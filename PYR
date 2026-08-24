@@ -1,0 +1,5932 @@
+#%% Fit the currents and plot the membrane potential
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
+
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)]=A
+    return Iext
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir=r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files=['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles=['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames=['Som', 'Feedback', 'Feedforward']
+
+dirtype=1
+ftype='F-I.csv'
+
+dirs = [somdir, fbdir, ffdir]
+
+data=pd.read_csv(dirs[dirtype]+'\{}'.format(ftype))
+data=np.array(data.iloc[:, :2])
+data[:,0]*=1e-9
+
+tmax = 1.5  # <----------------- simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+V0 = [-78e-3, -78e-3, -78e-3]  # reverse potential
+C_m = [200e-12, 200e-12, 200e-12] # capacitance
+vr = [-78e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(50.29e6), 1/(50.29e6), 1/(50.29e6)] # 15e-9  # leak conductance
+vt = [-50e-3, -50e-3, -50e-3]  # threshold level
+A=[0.557e-9, 0.557e-9,0.557e-9] # current amplitude
+
+
+Iext = geti(tmax, dt, A[dirtype])
+res=sim(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], 
+        rf, gL[dirtype], vt[dirtype], C_m[dirtype])
+t=np.linspace(0,len(Iext),len(Iext))*dt
+
+plt.figure()
+plt.subplot(3,1,1)
+plt.plot(t, Iext*1e9)
+plt.ylabel('Current (nA)')
+plt.xticks([])
+
+plt.subplot(3,1,2)
+plt.plot(t, res[0]*1000, label='membrane potnetial')
+plt.plot(t, vt[dirtype]*np.ones(len(t))*1000, label='threshold potential')
+plt.ylabel('Membrane\npotential (mV)')
+plt.xlabel('Time (sec)')
+plt.legend(loc='upper right')
+plt.show()
+
+# alist=np.arange(-0.1, 0.3, 0.05)
+alist=[-0.1, -0.05, 0.05, 0.1, 0.15, 0.2, 0.25]
+alist = np.array([a*1e-9 for a in alist if a!=0])
+ilist = [geti(tmax, dt, a) for a in alist]
+vlist = [sim(V0[dirtype], len(i), i, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype])[0] for i in ilist]
+
+plt.figure()
+plt.subplot(1,2,1)
+for i in range(len(vlist)):
+    plt.plot(t, ilist[i]*1e9)
+plt.xlabel('Time (sec)')
+plt.ylabel('Current (nA)')
+plt.subplot(1,2,2)
+for i in range(len(vlist)):
+    plt.plot(t, vlist[i]*1e3)
+plt.xlabel('Time (sec)')
+plt.ylabel('Membrane potential (mV)')
+plt.tight_layout()
+plt.show()
+
+
+#%% Plot the fout vs input current
+
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
+
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+def vthfun(v, v1, vt, aval):
+    if v <= v1:
+        return vt
+    else:
+        return vt + aval[0]*(v1-v)
+# @jit(nopython=True)
+
+def sima(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m, alpha, tauvth):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+    vth=np.zeros_like(V)
+
+    # Set initial conditions
+    V[0] = Vinit
+    vth[0]=vt
+
+    ratio = 0.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+        
+        dvthdt = -(vth[i-1]-vt)/tauvth
+        vth[i] = vth[i-1] + dvthdt * dt 
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vth[i]:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+
+            vth[i]+=alpha[0]+alpha[1]*(V[i]/vt)+alpha[2]*(V[i]/vt)**2
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout, vth
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)]=A
+    return Iext
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir=r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files=['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles=['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames=['Som', 'Feedback', 'Feedforward']
+
+dirtype=0 # <-------------------- 0-som, 1-FB, 2-FF
+ftype='F-I.csv'
+
+dirs = [somdir, fbdir, ffdir]
+
+data=pd.read_csv(dirs[dirtype]+'\{}'.format(ftype))
+data=np.array(data.iloc[:, :2])
+data[:,0]*=1e-9
+
+tmax = 1.5  # simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+V0 = [-78e-3, -78e-3, -78e-3]  # reverse potential
+C_m = [300e-12, 250e-12, 650e-12] # capacitance
+vr = [-78e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(50e6), 1/(50.29e6), 1/(120e6)] # 15e-9  # leak conductance
+vt = [-77e-3, -62e-3, -70e-3]  # threshold base level
+tauvth = [7e-3, 1e-3, 1e-3] # threshold time constant
+alpha = [[75e-3, 0e-3, 0e-3], 
+         [1e-3, 1e-3, 1e-3], 
+         [1e-3, 1e-3, 1e-3]]
+
+# =============================================================================
+# # sim test
+# res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+# plt.plot(res[0])
+# plt.plot(res[2])
+# # plt.ylim([-0.08, -0.065])
+# # plt.xlim([0, 3000])
+# plt.show()
+# #%%
+# =============================================================================
+
+alist=data[:,0]
+foutslist=[]
+dirtypes=range(3)
+for dirtype in range(3):
+    fouts=[]
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+        res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+        fouts.append(res[1])
+    foutslist.append(fouts)
+    
+for i in range(3):
+    plt.subplot(1,3,i+1)
+    plt.plot(alist*1e9, data[:, 1], label='experimental', marker='o')
+    plt.plot(alist*1e9, foutslist[i], label='simulation', marker='o', alpha=0.6)
+    # =============================================================================
+    # plt.plot(alist, data[:, 1], label='experimental', 
+    #             marker='o')
+    # plt.plot(alist, fouts, label='simulation', 
+    #          linewidth=1, alpha=0.8, marker='o')
+    # =============================================================================
+    
+    plt.ylabel('Output frequency')
+    plt.xlabel('Input current amplitude (nA)')
+    plt.plot([],[],' ', label='{}'.format(dirnames[i]))
+    plt.legend()
+    if i == 1:
+        plt.title('\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, tauvth={},alpha={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype], tauvth[0], alpha[dirtype][0]))
+plt.show()
+
+
+#%% Plot the fout vs input current (Thetas)
+
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
+
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+def vthfun(v, v1, vt, aval):
+    if v <= v1:
+        return vt
+    else:
+        return vt + aval[0]*(v1-v)
+# @jit(nopython=True)
+
+@jit(nopython=True)
+def thetainf(vm, vi, vin, vin2, vt, vtmin, at):
+    if vm < vi and vm > vin:
+        return vt
+    if vm >= vi:
+        return at*(vm-vi)+vt
+    if vm <= vin and vm > vin2:
+        return vtmin + (vt - vtmin) * (vm - vin2) / (vin - vin2)
+    if vm <= vin2:
+        return vtmin
+
+def sima(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m, alpha, tauvth, tautheta1,
+         tautheta2, vi, vin, vin2, vtmin, at):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+    vth=np.zeros_like(V)
+    
+    theta1 = np.zeros_like(V)
+    theta2 = np.zeros_like(V)
+    theta = np.zeros_like(V)
+
+    # Set initial conditions
+    V[0] = Vinit
+    theta[0]=vt
+    theta1[0]=vt
+    theta2[0]=0
+
+    ratio = 0.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+        
+        dvthdt = -(vth[i-1]-vt)/tauvth
+        vth[i] = vth[i-1] + dvthdt * dt 
+        
+        dtheta1dt = 1/tautheta1*(-theta1[i-1] +
+                                 thetainf(V[i-1], vi, vin, vin2, vt, vtmin, at))
+        theta1[i] = theta1[i-1] + dtheta1dt*dt
+
+        dtheta2dt = 1/tautheta2*(-theta2[i-1])
+        theta2[i] = theta2[i-1]+dtheta2dt*dt
+
+        theta[i] = theta1[i]+theta2[i]
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > theta[i]:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+
+            theta2[i] += alpha[0]+alpha[1]*(V[i]/vt)+alpha[2]*(V[i]/vt)**2 
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout, theta
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)]=A
+    return Iext
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir=r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files=['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles=['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames=['Som', 'Feedback', 'Feedforward']
+
+dirtype=0 # <-------------------- 0-som, 1-FB, 2-FF
+ftype='F-I.csv'
+
+dirs = [somdir, fbdir, ffdir]
+
+data=pd.read_csv(dirs[dirtype]+'\{}'.format(ftype))
+data=np.array(data.iloc[:, :2])
+data[:,0]*=1e-9
+
+tmax = 1.5  # simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+V0 = [-78e-3, -78e-3, -78e-3]  # reverse potential
+C_m = [250e-12, 250e-12, 650e-12] # capacitance
+vr = [-78e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(60e6), 1/(50.29e6), 1/(120e6)] # 15e-9  # leak conductance
+vt = [-76e-3, -62e-3, -70e-3]  # threshold base level
+tauvth = [4e-3, 1e-3, 1e-3] # threshold time constant
+alpha = [[40e-3, 0e-3, 0e-3], 
+         [1e-3, 1e-3, 1e-3], 
+         [1e-3, 1e-3, 1e-3]]
+
+# Closest exc fits so far
+tautheta1 = 5e-3  # time constant of the threshold change to the infinite value
+tautheta2 = 70e-3 # 20e-3  # time constant of the depolarized post-jump decay
+vi = -40e-3  # threshold increases when the membrane potential is above this level
+at = 1  # rate of polarization increase, larger means more curve downward at high f
+
+vin = -np.inf  # ignore
+vin2 = -np.inf  # ignore
+vtmin = -np.inf # the lower value of the threshold potential
+
+
+
+# sim test
+Iext=geti(tmax, dt, 1e-9)
+res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], 
+         vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype],
+         tautheta1,tautheta2,vi,vin,vin2,vtmin,at)
+fs=15
+plt.title(dirnames[dirtype]+'\nV0={}, C_m={}, v_r={}, gL={:.3g}, vt={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype]))
+plt.plot(res[0], label='membrane potential')
+plt.plot(res[2], label='threshold')
+plt.xlabel('Time (sec)', fontsize=fs)
+plt.ylabel('Membrane potential (V)', fontsize=fs)
+plt.tick_params(axis='both', labelsize=fs)
+plt.plot(vi*np.ones(len(res[0])), label='vi')
+plt.plot(vt[dirtype]*np.ones(len(res[0])), label='vt')
+# plt.ylim([-0.08, -0.065])
+# plt.xlim([0, 3000])
+plt.legend(loc='upper right')
+plt.show()
+#%% (Fout vs a's for theta)
+
+alist=data[:,0]
+fouts=[]
+for a in alist:
+    Iext = geti(tmax, dt, a)
+    # res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+    res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype], tautheta1,
+             tautheta2, vi, vin, vin2, vtmin, at)
+    fouts.append(res[1])
+
+plt.plot(alist*1e9, data[:, 1], label='experimental', marker='o')
+plt.plot(alist*1e9, fouts, label='simulation', marker='o', alpha=0.6)
+# =============================================================================
+# plt.plot(alist, data[:, 1], label='experimental', 
+#             marker='o')
+# plt.plot(alist, fouts, label='simulation', 
+#          linewidth=1, alpha=0.8, marker='o')
+# =============================================================================
+
+plt.ylabel('Output frequency')
+plt.xlabel('Input current amplitude (nA)')
+plt.legend()
+plt.title(dirnames[dirtype]+'\nV0={}, C_m={}, v_r={}, gL={:.3g}, vt={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype]))
+plt.show()
+
+#%% Meeting 3 - Connecting input output of different types
+
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
+
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+def vthfun(v, v1, vt, aval):
+    if v <= v1:
+        return vt
+    else:
+        return vt + aval[0]*(v1-v)
+# @jit(nopython=True)
+
+def sima(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m, alpha, tauvth):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+    vth=np.zeros_like(V)
+    apind=[]
+
+    # Set initial conditions
+    V[0] = Vinit
+    vth[0]=vt
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+        
+        dvthdt = -(vth[i-1]-vt)/tauvth
+        vth[i] = vth[i-1] + dvthdt * dt 
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vth[i]:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+                apind.append(i)
+            rfon = True
+            rftimer = rf
+
+            vth[i]+=alpha[0]+alpha[1]*(V[i]/vt)+alpha[2]*(V[i]/vt)**2
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout, vth, aplist, apind
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)]=A
+    return Iext
+
+def generate_spike_train(foutlen, spike_ind, template):
+    # blank array
+    out = np.zeros(foutlen)
+
+    Ltemp = len(template)
+
+    for pos in spike_ind:
+        end = pos + Ltemp
+        if end > foutlen:
+            end = foutlen
+
+        # add template at spike
+        out[pos:end] += template[:end - pos]
+
+    return out
+
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    # SynKernel = A * ( exp(-(x)/tauDecay) - exp(-(x)/tauRise) )
+    t = np.arange(0, tmax, dt)
+    A = scale_I / (-(tr/td)**(td/(td-tr)) + (tr/td)**(tr/(td-tr)))
+    template = A * (np.exp(-t / td) - np.exp(-t / tr))
+    return t, template
+
+
+def compute_fout_heatmap(dir1, dir2,
+                         amplitudes,
+                         strengths,
+                         tmax, dt, rf,
+                         V0, vr, gL, vt, C_m, alpha, tauvth,
+                         tr, td, ttemp):
+    
+    fout_map = np.zeros((len(amplitudes), len(strengths)))
+
+    for i, A in enumerate(amplitudes):
+        # input neuron → spikes
+        Iext = geti(tmax, dt, A)
+        res_in = sima(V0[dir1], len(Iext), Iext, dt,
+                      vr[dir1], rf, gL[dir1], vt[dir1],
+                      C_m[dir1], alpha[dir1], tauvth[dir1])
+        
+        spike_ind = res_in[4]
+
+        for j, s in enumerate(strengths):
+            print(i, len(amplitudes),j,len(strengths))
+            # synaptic kernel with strength s
+            _, temp = make_normalized_template(td, tr, ttemp, dt, s)
+
+            # spike train → current
+            syn_current = generate_spike_train(len(res_in[0]), spike_ind, temp)
+
+            # output neuron
+            res_out = sima(V0[dir2], len(syn_current), syn_current, dt,
+                           vr[dir2], rf, gL[dir2], vt[dir2],
+                           C_m[dir2], alpha[dir2], tauvth[dir2])
+
+            fout_map[i, j] = res_out[1]
+
+    return {
+        "fout_map": fout_map,
+        "amplitudes": amplitudes,
+        "strengths": strengths
+    }
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir=r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files=['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles=['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames=['Som', 'Feedback', 'Feedforward']
+ftype='F-I.csv'
+dirs = [somdir, fbdir, ffdir]
+
+dirtype=0 # <-------------------- 0-som, 1-FB, 2-FF
+dnames=['som', 'feedback', 'feedforward']
+
+dlist=[]
+for dirtype in range(3):
+    data=pd.read_csv(dirs[dirtype]+'\{}'.format(ftype))
+    data=np.array(data.iloc[:, :2])
+    data[:,0]*=1e-9
+    dlist.append(data)
+    
+tmax = 1.5  # simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+V0 = [-78e-3, -78e-3, -78e-3]  # reverse potential
+C_m = [300e-12, 250e-12, 650e-12] # capacitance
+vr = [-78e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(50e6), 1/(50.29e6), 1/(120e6)] # 15e-9  # leak conductance
+vt = [-77e-3, -62e-3, -70e-3]  # threshold base level
+tauvth = [7e-3, 1e-3, 1e-3] # threshold time constant
+alpha = [[75e-3, 0e-3, 0e-3], 
+         [1e-3, 1e-3, 1e-3], 
+         [1e-3, 1e-3, 1e-3]]
+
+tr=1e-3
+td=10e-3
+ttemp=1
+tmax=10
+dt=1e-4
+strength = 1e-9
+f=100
+t_temp, temp= make_normalized_template(td, tr, ttemp, dt, strength)
+
+dir1=0
+dir2=0
+
+# =============================================================================
+# amplitudes = np.array(dlist[dir1])[:,0]  # or whichever you want
+# strengths = np.linspace(1e-9, 10e-9, 20)
+# 
+# res = compute_fout_heatmap(
+#     dir1=dir1, dir2=dir2,
+#     amplitudes=amplitudes,
+#     strengths=strengths,
+#     tmax=tmax, dt=dt, rf=rf,
+#     V0=V0, vr=vr, gL=gL, vt=vt, C_m=C_m,
+#     alpha=alpha, tauvth=tauvth,
+#     tr=tr, td=td, ttemp=ttemp
+# )
+# 
+# # plot
+# plt.figure()
+# plt.imshow(res["fout_map"], aspect='auto', origin='lower',
+#            extent=[res["strengths"][0]*1e9, res["strengths"][-1]*1e9,
+#                    res["amplitudes"][0]*1e9, res["amplitudes"][-1]*1e9])
+# 
+# plt.colorbar(label='fout (Hz)')
+# plt.xlabel('Strength (nA)')
+# plt.ylabel('Amplitude (nA)')
+# plt.title(r'${} \rightarrow {}$'.format(dnames[dir1], dnames[dir2]))
+# plt.show()
+# =============================================================================
+
+# =============================================================================
+# # sim test
+# res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+# plt.plot(res[0])
+# plt.plot(res[2])
+# # plt.ylim([-0.08, -0.065])
+# # plt.xlim([0, 3000])
+# plt.show()
+# #%%
+# =============================================================================
+
+foutslist=[]
+for i, dirtype in enumerate(range(3)):
+    alist=np.array(dlist[i])[:,0] # amplitude list input
+    fouts=[]
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+        res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+        fouts.append(res[1])
+    foutslist.append(fouts)
+    
+for i in range(3):
+    plt.subplot(1,3,i+1)
+    alist=dlist[i][:,0]
+    plt.plot(alist*1e9, dlist[i][:, 1], label='experimental', marker='o')
+    plt.plot(alist*1e9, foutslist[i], label='simulation', marker='o', alpha=0.6)
+    # =============================================================================
+    # plt.plot(alist, data[:, 1], label='experimental', 
+    #             marker='o')
+    # plt.plot(alist, fouts, label='simulation', 
+    #          linewidth=1, alpha=0.8, marker='o')
+    # =============================================================================
+    
+    plt.ylabel('Output frequency')
+    plt.xlabel('Input current amplitude (nA)')
+    plt.plot([],[],' ', label='{}'.format(dirnames[i]))
+    plt.legend()
+    if i == 1:
+        plt.title('\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, tauvth={},alpha={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype], tauvth[0], alpha[dirtype][0]))
+plt.show()
+
+foutslist=[]
+for i, dirtype in enumerate(range(3)):
+    alist=np.array(dlist[i])[:,0] # amplitude list input
+    fouts=[]
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+        res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+        fouts.append(res[1])
+    foutslist.append(fouts)
+#%%
+
+import matplotlib.pyplot as plt
+
+plt.rcParams.update({
+    'font.size': 15,
+    'axes.labelsize': 15,
+    'axes.titlesize': 15,
+    'xtick.labelsize': 15,
+    'ytick.labelsize': 15,
+})
+
+Iext = geti(tmax, dt, 0.08e-9)
+t_temp, temp = make_normalized_template(td, tr, ttemp, dt, strength)
+res = sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+out = generate_spike_train(len(res[0]), res[4], temp)
+res2 = sima(V0[dirtype], len(out), out, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+
+fig, ax = plt.subplots(4, 1, figsize=(6, 8))
+
+ax[0].plot(Iext)
+ax[0].set_xticks([])
+ax[0].set_ylabel('Input\ncurrent')
+
+ax[1].plot(res[0])
+ax[1].set_xticks([])
+ax[1].set_ylabel('Membrane\npotential')
+
+ax[2].plot(out)
+ax[2].set_xticks([])
+ax[2].set_ylabel('Input\nspikes')
+
+t = np.arange(len(res2[0])) * dt
+ax[3].plot(t, res2[0])
+ax[3].set_xlabel('Time (sec)')
+ax[3].set_ylabel('2nd neuron\noutput\nfrequency')
+
+# ensure tick params are also set
+for a in ax:
+    a.tick_params(labelsize=15)
+
+plt.tight_layout()
+plt.show()
+
+#%% 3 - calculate heatmap 
+strengths = np.linspace(0e-9, 1.5e-9, 20)
+
+outlist=np.zeros((3,3), dtype=object)
+for dir1 in range(3):
+    for dir2 in range(3):
+        print(dir1, 3, dir2, 3)
+        amplitudes = np.array(dlist[dir1])[:,0]
+        res = compute_fout_heatmap(
+            dir1=dir1, dir2=dir2,
+            amplitudes=amplitudes,
+            strengths=strengths,
+            tmax=tmax, dt=dt, rf=rf,
+            V0=V0, vr=vr, gL=gL, vt=vt, C_m=C_m,
+            alpha=alpha, tauvth=tauvth,
+            tr=tr, td=td, ttemp=ttemp
+        )
+        outlist[dir1,dir2]=res['fout_map']
+
+#%% 3 - plot heatmap
+
+fig, ax = plt.subplots(3, 3, figsize=(10, 10))
+
+for dir1 in range(3):
+    amplitudes = np.array(dlist[dir1])[:,0]
+    for dir2 in range(3):
+        im = ax[dir1, dir2].imshow(
+            outlist[dir1, dir2],
+            aspect='auto',
+            origin='lower',
+            extent=[strengths[0]*1e9, strengths[-1]*1e9,
+                    amplitudes[0]*1e9, amplitudes[-1]*1e9]
+        )
+
+        fig.colorbar(im, ax=ax[dir1, dir2], label='fout (Hz)')
+        ax[dir1, dir2].set_xlabel('Strength (nA)')
+        ax[dir1, dir2].set_ylabel('Amplitude (nA)')
+        ax[dir1, dir2].set_title(r'${} \rightarrow {}$'.format(dnames[dir1], dnames[dir2]))
+
+plt.tight_layout()
+plt.show()
+
+#%% Meeting 3 - Connecting input output of different types
+
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
+
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+def vthfun(v, v1, vt, aval):
+    if v <= v1:
+        return vt
+    else:
+        return vt + aval[0]*(v1-v)
+# @jit(nopython=True)
+
+def sima(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m, alpha, tauvth):
+    
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+    vth=np.zeros_like(V)
+    apind=[]
+
+    # Set initial conditions
+    V[0] = Vinit
+    vth[0]=vt
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+    
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+        
+        dvthdt = -(vth[i-1]-vt)/tauvth
+        vth[i] = vth[i-1] + dvthdt * dt 
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vth[i]:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+                apind.append(i)
+            rfon = True
+            rftimer = rf
+
+            vth[i]+=alpha[0]+alpha[1]*(V[i]/vt)+alpha[2]*(V[i]/vt)**2
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout, vth, aplist, apind
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)]=A
+    return Iext
+
+def generate_spike_train(foutlen, spike_ind, template):
+    # blank array
+    out = np.zeros(foutlen)
+
+    Ltemp = len(template)
+
+    for pos in spike_ind:
+        end = pos + Ltemp
+        if end > foutlen:
+            end = foutlen
+
+        # add template at spike
+        out[pos:end] += template[:end - pos]
+
+    return out
+
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    # SynKernel = A * ( exp(-(x)/tauDecay) - exp(-(x)/tauRise) )
+    t = np.arange(0, tmax, dt)
+    A = scale_I / (-(tr/td)**(td/(td-tr)) + (tr/td)**(tr/(td-tr)))
+    template = A * (np.exp(-t / td) - np.exp(-t / tr))
+    return t, template
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir=r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files=['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles=['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames=['Som', 'Feedback', 'Feedforward']
+ftype='F-I.csv'
+dirs = [somdir, fbdir, ffdir]
+
+dirtype=0 # <-------------------- 0-som, 1-FB, 2-FF
+dnames=['som', 'feedback', 'feedforward']
+
+dlist=[]
+for dirtype in range(3):
+    data=pd.read_csv(dirs[dirtype]+'\{}'.format(ftype))
+    data=np.array(data.iloc[:, :2])
+    data[:,0]*=1e-9
+    dlist.append(data)
+    
+tmax = 1.5  # simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+V0 = [-78e-3, -78e-3, -78e-3]  # reverse potential
+C_m = [300e-12, 250e-12, 650e-12] # capacitance
+vr = [-78e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(50e6), 1/(50.29e6), 1/(120e6)] # 15e-9  # leak conductance
+vt = [-77e-3, -62e-3, -70e-3]  # threshold base level
+tauvth = [7e-3, 1e-3, 1e-3] # threshold time constant
+alpha = [[75e-3, 0e-3, 0e-3], 
+         [1e-3, 1e-3, 1e-3], 
+         [1e-3, 1e-3, 1e-3]]
+
+tr=1e-3
+td=10e-3
+ttemp=1
+tmax=10
+dt=1e-4
+strength = 1e-9
+f=100
+t_temp, temp= make_normalized_template(td, tr, ttemp, dt, strength)
+
+dir1=0
+dir2=0
+
+# =============================================================================
+# amplitudes = np.array(dlist[dir1])[:,0]  # or whichever you want
+# strengths = np.linspace(1e-9, 10e-9, 20)
+# 
+# res = compute_fout_heatmap(
+#     dir1=dir1, dir2=dir2,
+#     amplitudes=amplitudes,
+#     strengths=strengths,
+#     tmax=tmax, dt=dt, rf=rf,
+#     V0=V0, vr=vr, gL=gL, vt=vt, C_m=C_m,
+#     alpha=alpha, tauvth=tauvth,
+#     tr=tr, td=td, ttemp=ttemp
+# )
+# 
+# # plot
+# plt.figure()
+# plt.imshow(res["fout_map"], aspect='auto', origin='lower',
+#            extent=[res["strengths"][0]*1e9, res["strengths"][-1]*1e9,
+#                    res["amplitudes"][0]*1e9, res["amplitudes"][-1]*1e9])
+# 
+# plt.colorbar(label='fout (Hz)')
+# plt.xlabel('Strength (nA)')
+# plt.ylabel('Amplitude (nA)')
+# plt.title(r'${} \rightarrow {}$'.format(dnames[dir1], dnames[dir2]))
+# plt.show()
+# =============================================================================
+
+# =============================================================================
+# # sim test
+# res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+# plt.plot(res[0])
+# plt.plot(res[2])
+# # plt.ylim([-0.08, -0.065])
+# # plt.xlim([0, 3000])
+# plt.show()
+# #%%
+# =============================================================================
+
+foutslist=[]
+for i, dirtype in enumerate(range(3)):
+    alist=np.array(dlist[i])[:,0] # amplitude list input
+    fouts=[]
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+        res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+        fouts.append(res[1])
+    foutslist.append(fouts)
+    
+for i in range(3):
+    plt.subplot(1,3,i+1)
+    alist=dlist[i][:,0]
+    plt.plot(alist*1e9, dlist[i][:, 1], label='experimental', marker='o')
+    plt.plot(alist*1e9, foutslist[i], label='simulation', marker='o', alpha=0.6)
+    # =============================================================================
+    # plt.plot(alist, data[:, 1], label='experimental', 
+    #             marker='o')
+    # plt.plot(alist, fouts, label='simulation', 
+    #          linewidth=1, alpha=0.8, marker='o')
+    # =============================================================================
+    
+    plt.ylabel('Output frequency')
+    plt.xlabel('Input current amplitude (nA)')
+    plt.plot([],[],' ', label='{}'.format(dirnames[i]))
+    plt.legend()
+    if i == 1:
+        plt.title('\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, tauvth={},alpha={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype], tauvth[0], alpha[dirtype][0]))
+plt.show()
+
+foutslist=[]
+for i, dirtype in enumerate(range(3)):
+    alist=np.array(dlist[i])[:,0] # amplitude list input
+    fouts=[]
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+        res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+        fouts.append(res[1])
+    foutslist.append(fouts)
+    
+#%% double exponential
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 0.01
+T = 1000
+time = np.arange(0, T, dt)
+
+tau_m = 20.0
+Vth = 1.0
+Vreset = 0.0
+
+# Synaptic rise and decay times
+tau_r = 2.0
+tau_d = 10.0
+
+# =====================================
+# Neuron indices
+# =====================================
+PYR1 = 0
+PYR2 = 1
+FB1  = 2
+FB2  = 3
+FF1  = 4
+FF2  = 5
+
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+N = 6
+
+# =====================================
+# Weight matrix
+# W[pre, post]
+# =====================================
+W = np.zeros((N, N))
+
+# PYR1 excites
+W[PYR1, PYR2] = 2.0
+W[PYR1, FB1 ] = 2.0
+W[PYR1, FB2 ] = 2.0
+
+# PYR2 excites
+W[PYR2, PYR1] = 2.0
+W[PYR2, FB1 ] = 2.0
+W[PYR2, FB2 ] = 2.0
+
+# FB1 inhibits
+W[FB1, PYR2] = -2.0
+W[FB1, FB2 ] = -2.0
+
+# FB2 inhibits
+W[FB2, PYR1] = -2.0
+W[FB2, PYR2] = -2.0
+W[FB2, FB1 ] = -2.0
+
+# FF1 inhibits
+W[FF1, PYR1] = -2.0
+W[FF1, PYR2] = -2.0
+W[FF1, FF2 ] = -2.0
+
+# FF2 inhibits
+W[FF2, PYR1] = -2.0
+W[FF2, PYR2] = -2.0
+W[FF2, FF1 ] = -2.0
+
+# =====================================
+# External input
+# =====================================
+Iext = np.zeros((N, len(time)))
+
+pulse = np.zeros(len(time))
+
+tstart=100
+tend=800
+pulse[(time >= tstart) & (time < tend)] = 4.5
+
+# Input excites PYR1, PYR2, FF1, FF2
+Iext[PYR1] = pulse
+Iext[PYR2] = pulse
+Iext[FF1 ] = pulse
+Iext[FF2 ] = pulse
+
+# =====================================
+# State variables
+# =====================================
+V = np.zeros((N, len(time)))
+spikes = np.zeros((N, len(time)))
+
+# Synaptic state variables
+xr = np.zeros((N, N))
+xd = np.zeros((N, N))
+
+# =====================================
+# Simulation
+# =====================================
+for t in range(1, len(time)):
+
+    # Decay synapses
+    xr += dt * (-xr / tau_r)
+    xd += dt * (-xd / tau_d)
+
+    # Double exponential conductances
+    g = xd - xr
+
+    for post in range(N):
+
+        Isyn = np.sum(W[:, post] * g[:, post])
+
+        V[post, t] = (
+            V[post, t-1]
+            + dt * (
+                -V[post, t-1]
+                + Iext[post, t-1]
+                + Isyn
+            ) / tau_m
+        )
+
+        if V[post, t] >= Vth:
+
+            spikes[post, t] = 1
+            V[post, t] = Vreset
+
+            # Trigger all outgoing synapses
+            active = (W[post, :] != 0)
+
+            xr[post, active] += 1.0
+            xd[post, active] += 1.0
+
+# =====================================
+# Plot
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(8, 1, figsize=(12, 12), sharex=True)
+
+ax[0].plot(time, pulse)
+ax[0].set_ylabel("Input", fontsize=fs)
+
+ax[1].plot(time, V[PYR1])
+ax[1].set_ylabel("PYR1", fontsize=fs)
+
+ax[2].plot(time, V[PYR2])
+ax[2].set_ylabel("PYR2", fontsize=fs)
+
+ax[3].plot(time, V[FB1])
+ax[3].set_ylabel("FB1", fontsize=fs)
+
+ax[4].plot(time, V[FB2])
+ax[4].set_ylabel("FB2", fontsize=fs)
+
+ax[5].plot(time, V[FF1])
+ax[5].set_ylabel("FF1", fontsize=fs)
+
+ax[6].plot(time, V[FF2])
+ax[6].set_ylabel("FF2", fontsize=fs)
+
+ax[7].eventplot(
+    [time[spikes[i] == 1] for i in range(N)],
+    lineoffsets=np.arange(1, N + 1)
+)
+
+ax[7].set_yticks(np.arange(1, N + 1))
+ax[7].set_yticklabels(names, fontsize=fs)
+ax[7].set_ylabel("Spikes", fontsize=fs)
+ax[7].set_xlabel("Time (ms)", fontsize=fs)
+
+# Make all tick labels the same size
+for a in ax:
+    a.tick_params(axis='both', labelsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% SOM / FB / FF double-exponential network with adaptive LIF neurons
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 0.001
+T = 500
+time = np.arange(0, T, dt)
+
+# =====================================
+# Neuron indices
+# =====================================
+PYR1 = 0
+PYR2 = 1
+FB1  = 2
+FB2  = 3
+FF1  = 4
+FF2  = 5
+
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+N = 6
+
+# =====================================
+# Cell-type mapping
+# 0 = SOM, 1 = FB, 2 = FF
+# =====================================
+celltype = np.array([0, 0, 1, 1, 2, 2])
+
+# =====================================
+# SOM / FB / FF parameters (from your earlier code)
+# =====================================
+
+V0 = [-78e-3, -78e-3, -78e-3]
+C_m = [300e-12, 250e-12, 650e-12]
+vr  = [-78e-3, -78e-3, -78e-3]
+gL  = [1/(50e6), 1/(50.29e6), 1/(120e6)]
+vt  = [-77e-3, -62e-3, -70e-3]
+tauvth = [7e-3, 1e-3, 1e-3]
+
+alpha = [
+    [75e-3, 0e-3, 0e-3],
+    [1e-3, 1e-3, 1e-3],
+    [1e-3, 1e-3, 1e-3]
+]
+
+rf = 1e-3
+
+# =====================================
+# Weight matrix (same as before)
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1 ] = 1e-9
+W[PYR1, FB2 ] = 1e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1 ] = 1e-9
+W[PYR2, FB2 ] = 1e-9
+
+W[FB1, PYR2] = -1*0
+W[FB1, FB2 ] = -1*0
+
+W[FB2, PYR1] = -1*0
+W[FB2, PYR2] = -1*0
+W[FB2, FB1 ] = -1*0
+
+W[FF1, PYR1] = -1*0
+W[FF1, PYR2] = -1*0
+W[FF1, FF2 ] = -1*0
+
+W[FF2, PYR1] = -1*0
+W[FF2, PYR2] = -1*0
+W[FF2, FF1 ] = -1*0
+
+# =====================================
+# External input
+# =====================================
+Iext = np.zeros((N, len(time)))
+
+pulse = np.zeros(len(time))
+tstart, tend = 100, 400
+pulse[(time >= tstart) & (time < tend)] = 1e-9
+
+Iext[PYR1] = pulse
+Iext[PYR2] = pulse
+Iext[FF1 ] = pulse
+Iext[FF2 ] = pulse
+
+# =====================================
+# State variables
+# =====================================
+V = np.zeros((N, len(time)))
+Vth_net = np.zeros((N, len(time)))
+spikes = np.zeros((N, len(time)))
+
+rfon = np.zeros(N, dtype=bool)
+rftimer = np.ones(N) * np.inf
+
+# init
+for n in range(N):
+    tp = celltype[n]
+    V[n, 0] = V0[tp]
+    Vth_net[n, 0] = vt[tp]
+
+# =====================================
+# Synapses (double exponential)
+# =====================================
+tau_r = 1e-3
+tau_d = 10e-3
+
+xr = np.zeros((N, N))
+xd = np.zeros((N, N))
+
+# =====================================
+# Simulation
+# =====================================
+for t in range(1, len(time)):
+
+    xr += dt * (-xr / tau_r)
+    xd += dt * (-xd / tau_d)
+
+    g = xd - xr
+
+    for post in range(N):
+
+        tp = celltype[post]
+
+        Isyn = np.sum(W[:, post] * g[:, post])
+
+        I_total = Iext[post, t-1] + Isyn
+
+        i_ion = gL[tp] * (V[post, t-1] - V0[tp])
+
+        dVdt = (I_total - i_ion) / C_m[tp]
+
+        if not rfon[post]:
+            V[post, t] = V[post, t-1] + dt * dVdt
+        else:
+            V[post, t] = vr[tp]
+
+        # threshold dynamics
+        dvthdt = -(Vth_net[post, t-1] - vt[tp]) / tauvth[tp]
+        Vth_net[post, t] = Vth_net[post, t-1] + dt * dvthdt
+
+        # refractory
+        if rftimer[post] != np.inf:
+            rftimer[post] -= dt
+            if rftimer[post] <= 0:
+                rftimer[post] = np.inf
+                rfon[post] = False
+
+        # spike
+        if V[post, t] > Vth_net[post, t]:
+
+            spikes[post, t] = 1
+
+            Vth_net[post, t] += (
+                alpha[tp][0]
+                + alpha[tp][1] * (V[post, t] / vt[tp])
+                + alpha[tp][2] * (V[post, t] / vt[tp])**2
+            )
+
+            V[post, t] = vr[tp]
+
+            rfon[post] = True
+            rftimer[post] = rf
+
+            active = (W[post, :] != 0)
+            xr[post, active] += 1.0
+            xd[post, active] += 1.0
+
+# =====================================
+# Plot
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(8, 1, figsize=(12, 12), sharex=True)
+
+ax[0].plot(time, pulse)
+ax[0].set_ylabel("Input", fontsize=fs)
+
+ax[1].plot(time, V[PYR1])
+ax[1].set_ylabel("PYR1", fontsize=fs)
+
+ax[2].plot(time, V[PYR2])
+ax[2].set_ylabel("PYR2", fontsize=fs)
+
+ax[3].plot(time, V[FB1])
+ax[3].set_ylabel("FB1", fontsize=fs)
+
+ax[4].plot(time, V[FB2])
+ax[4].set_ylabel("FB2", fontsize=fs)
+
+ax[5].plot(time, V[FF1])
+ax[5].set_ylabel("FF1", fontsize=fs)
+
+ax[6].plot(time, V[FF2])
+ax[6].set_ylabel("FF2", fontsize=fs)
+
+ax[7].eventplot(
+    [time[spikes[i] == 1] for i in range(N)],
+    lineoffsets=np.arange(1, N + 1)
+)
+
+ax[7].set_yticks(np.arange(1, N + 1))
+ax[7].set_yticklabels(names, fontsize=fs)
+ax[7].set_ylabel("Spikes", fontsize=fs)
+ax[7].set_xlabel("Time (ms)", fontsize=fs)
+
+for a in ax:
+    a.tick_params(axis='both', labelsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+
+#%% 4- Pure recurrent integrate-and-fire network (pulse current)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 1e-4
+T = 0.5
+time = np.arange(0, T, dt)
+
+rf = 1e-3
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters (FIXED)
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+# PYR
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+# FB
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# FF
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Weight matrix (UNCHANGED)
+# =====================================
+W = np.zeros((N, N))
+
+# in the pulse model it doesn't matter what value of W pyr1 pyr2 and vice
+# versa because once an AP occurs in one an AP occurs in the other and
+# any increase caused by the other PYR doesn't occur because of the 
+# refractory period
+
+W[PYR1, PYR2] = 2e-9
+W[PYR1, FB1 ] = 5e-9
+W[PYR1, FB2 ] = 5e-9
+
+W[PYR2, PYR1] = 2e-9
+W[PYR2, FB1 ] = 2e-9
+W[PYR2, FB2 ] = 2e-9
+
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2 ] = -2.0e-9
+
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1 ] = -2.0e-9
+
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2 ] = -2.0e-9
+
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1 ] = -2.0e-9
+
+# =====================================
+# External input
+# =====================================
+Iext = np.zeros((N, len(time)))
+
+pulse = np.zeros(len(time))
+pulse[(time >= 0.1) & (time < 0.4)] = 0.02001e-9
+
+Iext[PYR1] = pulse
+Iext[PYR2] = pulse
+Iext[FF1 ] = pulse
+Iext[FF2 ] = pulse
+
+# =====================================
+# State variables
+# =====================================
+V = np.zeros((N, len(time)))
+vth = np.zeros((N, len(time)))
+spikes = np.zeros((N, len(time)))
+
+for i in range(N):
+    V[i, 0] = V0[i]
+    vth[i, 0] = vt[i]
+
+rfon = np.zeros(N)
+rftimer = np.ones(N) * np.inf
+
+
+# =====================================
+# Simulation
+# =====================================
+for t in range(1, len(time)):
+
+    for post in range(N):
+
+        Isyn = np.sum(W[:, post] * spikes[:, t-1])
+        I = Iext[post, t-1] + Isyn
+
+        i_ion = gL[post] * (V[post, t-1] - V0[post])
+        dVdt = (1 / C_m[post]) * (I - i_ion)
+
+        V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+        dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+        vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+        if rftimer[post] != np.inf:
+            rftimer[post] -= dt
+
+        if rftimer[post] <= 0:
+            rftimer[post] = np.inf
+            rfon[post] = False
+
+        if V[post, t] > vth[post, t]:
+
+            spikes[post, t] = 1
+            rfon[post] = True
+            rftimer[post] = rf
+
+            vth[post, t] += (
+                alpha[post][0]
+                + alpha[post][1] * (V[post, t] / vt[post])
+                + alpha[post][2] * (V[post, t] / vt[post]) ** 2
+            )
+
+            V[post, t] = vr[post]
+
+# =====================================
+# Plot
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(7, 1, figsize=(12, 14), sharex=True)
+
+ax[0].plot(time, pulse)
+ax[0].set_ylabel("Input", fontsize=fs)
+
+for i in range(6):
+    ax[i+1].plot(time, V[i], label="V")
+    ax[i+1].plot(time, vth[i], linestyle="--", label="Vth")
+    ax[i+1].set_ylabel(names[i], fontsize=fs)
+    ax[i+1].legend(fontsize=fs, loc="upper right")
+
+for a in ax:
+    a.tick_params(axis='both', labelsize=fs)
+
+ax[-1].set_xlabel("Time (s)", fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% 4 -Pure recurrent integrate-and-fire network Poisson delta current spikes
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 1e-4
+T = 1
+time = np.arange(0, T, dt)
+
+rf = 1e-3
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1 ] = 35e-9
+W[PYR1, FB2 ] = 35e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1 ] = 2e-9
+W[PYR2, FB2 ] = 2e-9
+
+sfb=-2e-9
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2 ] = sfb
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1 ] = sfb
+
+sff=-2e-9
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2 ] = sff
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1 ] = sff
+
+# =====================================
+# External input (Poisson spike train -> decaying currents)
+# =====================================
+rate = 100  # Hz
+
+Aext=2e-9
+Aext_pyr1 = Aext
+Aext_pyr2 = Aext
+Aext_fb1  = Aext
+Aext_fb2  = Aext
+Aext_ff1  = Aext
+Aext_ff2  = Aext
+
+tau_inp = np.zeros(N)
+tau_input=2e-3
+tau_inp[PYR1] = tau_input
+tau_inp[PYR2] = tau_input
+tau_inp[FB1]  = tau_input
+tau_inp[FB2]  = tau_input
+tau_inp[FF1]  = tau_input
+tau_inp[FF2]  = tau_input
+
+pfire=0.5
+ppyr1 = pfire
+ppyr2 = pfire
+pff1  = pfire
+pff2  = pfire
+
+spike_drive = np.random.rand(len(time)) < rate * dt
+
+for t in range(len(time)):
+    if spike_drive[t]:
+
+        if np.random.rand() < ppyr1:
+            Iext[PYR1, t] += Aext_pyr1
+        if np.random.rand() < ppyr2:
+            Iext[PYR2, t] += Aext_pyr2
+
+        if np.random.rand() < pff1:
+            Iext[FF1, t] += Aext_ff1
+        if np.random.rand() < pff2:
+            Iext[FF2, t] += Aext_ff2
+
+        # FB gets driven too (same event, independent amplitude)
+        if np.random.rand() < 0.9:
+            Iext[FB1, t] += Aext_fb1
+        if np.random.rand() < 0.9:
+            Iext[FB2, t] += Aext_fb2
+
+# =====================================
+# State variables
+# =====================================
+V = np.zeros((N, len(time)))
+vth = np.zeros((N, len(time)))
+spikes = np.zeros((N, len(time)))
+
+for i in range(N):
+    V[i, 0] = V0[i]
+    vth[i, 0] = vt[i]
+
+rfon = np.zeros(N)
+rftimer = np.ones(N) * np.inf
+
+# =====================================
+# Simulation
+# =====================================
+for t in range(1, len(time)):
+
+    for post in range(N):
+
+        Isyn = np.sum(W[:, post] * spikes[:, t-1])
+        I = Iext[post, t-1] + Isyn
+
+        i_ion = gL[post] * (V[post, t-1] - V0[post])
+        dVdt = (1 / C_m[post]) * (I - i_ion)
+
+        V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+        dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+        vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+        if rftimer[post] != np.inf:
+            rftimer[post] -= dt
+
+        if rftimer[post] <= 0:
+            rftimer[post] = np.inf
+            rfon[post] = False
+
+        if V[post, t] > vth[post, t]:
+
+            spikes[post, t] = 1
+            rfon[post] = True
+            rftimer[post] = rf
+
+            vth[post, t] += (
+                alpha[post][0]
+                + alpha[post][1] * (V[post, t] / vt[post])
+                + alpha[post][2] * (V[post, t] / vt[post]) ** 2
+            )
+
+            V[post, t] = vr[post]
+
+# =====================================
+# Plot
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(8, 1, figsize=(12, 14), sharex=True)
+
+ax[0].plot(time, Iext[PYR1], label="Poisson input")
+ax[0].set_ylabel("Input")
+
+for i in range(6):
+    ax[i+1].plot(time, V[i], label="V")
+    ax[i+1].plot(time, vth[i], linestyle="--", label="Vth")
+    ax[i+1].set_ylabel(names[i])
+    ax[i+1].legend(fontsize=8, loc="upper right")
+
+colors = plt.cm.tab10(np.arange(N))
+
+ax[7].eventplot(
+    [time[spikes[i] == 1] for i in range(N)],
+    lineoffsets=np.arange(1, N + 1),
+    colors=colors
+)
+
+ax[7].set_yticks(np.arange(1, N + 1))
+ax[7].set_yticklabels(names)
+ax[7].set_ylabel("Spikes")
+
+plt.tight_layout()
+plt.show()
+
+#%% 4 - Pure recurrent integrate-and-fire network Poisson exponential decay currents)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 1e-4
+T = 1
+time = np.arange(0, T, dt)
+
+rf = 1e-3
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1 ] = 35e-9
+W[PYR1, FB2 ] = 35e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1 ] = 2e-9
+W[PYR2, FB2 ] = 2e-9
+
+sfb=-2e-9
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2 ] = sfb
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1 ] = sfb
+
+sff=-2e-9
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2 ] = sff
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1 ] = sff
+
+# =====================================
+# External input (Poisson spike train -> decaying currents)
+# =====================================
+rate = 100  # Hz
+
+Aext=2e-9
+Aext_pyr1 = Aext
+Aext_pyr2 = Aext
+Aext_fb1  = Aext
+Aext_fb2  = Aext
+Aext_ff1  = Aext
+Aext_ff2  = Aext
+
+tau_inp = np.zeros(N)
+tau_input=2e-3
+tau_inp[PYR1] = tau_input
+tau_inp[PYR2] = tau_input
+tau_inp[FB1]  = tau_input
+tau_inp[FB2]  = tau_input
+tau_inp[FF1]  = tau_input
+tau_inp[FF2]  = tau_input
+
+pfire=0.5
+ppyr1 = pfire
+ppyr2 = pfire
+pff1  = pfire
+pff2  = pfire
+
+spike_drive = np.random.rand(len(time)) < rate * dt
+
+# synaptic input current (decays)
+Idec = np.zeros((N, len(time)))
+
+for t in range(1, len(time)):
+
+    # exponential decay
+    for i in range(N):
+        Idec[i, t] = Idec[i, t-1] + dt * (-Idec[i, t-1] / tau_inp[i])
+
+    # Poisson events add pulses
+    if spike_drive[t]:
+
+        if np.random.rand() < ppyr1:
+            Idec[PYR1, t] += Aext_pyr1
+        if np.random.rand() < ppyr2:
+            Idec[PYR2, t] += Aext_pyr2
+
+        if np.random.rand() < pff1:
+            Idec[FF1, t] += Aext_ff1
+        if np.random.rand() < pff2:
+            Idec[FF2, t] += Aext_ff2
+
+        if np.random.rand() < 0.9:
+            Idec[FB1, t] += Aext_fb1
+        if np.random.rand() < 0.9:
+            Idec[FB2, t] += Aext_fb2
+
+# =====================================
+# State variables
+# =====================================
+V = np.zeros((N, len(time)))
+vth = np.zeros((N, len(time)))
+spikes = np.zeros((N, len(time)))
+
+for i in range(N):
+    V[i, 0] = V0[i]
+    vth[i, 0] = vt[i]
+
+rfon = np.zeros(N)
+rftimer = np.ones(N) * np.inf
+
+# =====================================
+# Simulation
+# =====================================
+for t in range(1, len(time)):
+
+    for post in range(N):
+
+        Isyn = np.sum(W[:, post] * spikes[:, t-1])
+        I = Idec[post, t-1] + Isyn
+
+        i_ion = gL[post] * (V[post, t-1] - V0[post])
+        dVdt = (1 / C_m[post]) * (I - i_ion)
+
+        V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+        dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+        vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+        if rftimer[post] != np.inf:
+            rftimer[post] -= dt
+
+        if rftimer[post] <= 0:
+            rftimer[post] = np.inf
+            rfon[post] = False
+
+        if V[post, t] > vth[post, t]:
+
+            spikes[post, t] = 1
+            rfon[post] = True
+            rftimer[post] = rf
+
+            vth[post, t] += (
+                alpha[post][0]
+                + alpha[post][1] * (V[post, t] / vt[post])
+                + alpha[post][2] * (V[post, t] / vt[post]) ** 2
+            )
+
+            V[post, t] = vr[post]
+
+# =====================================
+# Plot
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(7, 1, figsize=(12, 14), sharex=True)
+
+ax[0].plot(time, Idec[PYR1], label="Poisson decaying input")
+ax[0].set_ylabel("Input")
+
+for i in range(6):
+    ax[i+1].plot(time, V[i], label="V")
+    ax[i+1].plot(time, vth[i], linestyle="--", label="Vth")
+    ax[i+1].set_ylabel(names[i])
+    ax[i+1].legend(fontsize=8, loc="upper right")
+
+colors = plt.cm.tab10(np.arange(N))
+
+# ax[7].eventplot(
+#     [time[spikes[i] == 1] for i in range(N)],
+#     lineoffsets=np.arange(1, N + 1),
+#     colors=colors
+# )
+
+# ax[7].set_yticks(np.arange(1, N + 1))
+# ax[7].set_yticklabels(names)
+# ax[7].set_ylabel("Spikes")
+
+plt.tight_layout()
+plt.show()
+
+
+#%% 4 - Pure recurrent integrate-and-fire network
+# kernel-based probabilistic input (correct synaptic kernel version)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 1e-4
+T = 1
+time = np.arange(0, T, dt)
+
+rf = 1e-3
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1 ] = 35e-9
+W[PYR1, FB2 ] = 35e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1 ] = 2e-9
+W[PYR2, FB2 ] = 2e-9
+
+sfb = -2e-9
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2 ] = sfb
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1 ] = sfb
+
+sff = -2e-9
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2 ] = sff
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1 ] = sff
+
+# =====================================
+# Kernel definition (REQUIRED FORM)
+# =====================================
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    # SynKernel = A * ( exp(-(x)/tauDecay) - exp(-(x)/tauRise) )
+    t = np.arange(0, tmax, dt)
+    A = scale_I / (-(tr/td)**(td/(td-tr)) + (tr/td)**(tr/(td-tr)))
+    template = A * (np.exp(-t / td) - np.exp(-t / tr))
+    return t, template
+
+# =====================================
+# External input (ONLY 4 sources)
+# =====================================
+
+rate = 100  # Hz
+pfire = 0.2
+
+ppyr1 = pfire
+ppyr2 = pfire
+pff1  = pfire
+pff2  = pfire
+
+Aext = 2e-9
+
+td = 2e-3
+tr = 0.2e-3
+tmax = 20e-3
+
+_, kernel = make_normalized_template(td, tr, tmax, dt, Aext)
+klen = len(kernel)
+
+# 4 blank input arrays
+I_pyr1 = np.zeros(len(time))
+I_pyr2 = np.zeros(len(time))
+I_ff1  = np.zeros(len(time))
+I_ff2  = np.zeros(len(time))
+
+spike_drive = np.random.rand(len(time)) < rate * dt
+
+for t in np.where(spike_drive)[0]:
+
+    if np.random.rand() < ppyr1:
+        end = min(t + klen, len(time))
+        I_pyr1[t:end] += kernel[:end - t]
+
+    if np.random.rand() < ppyr2:
+        end = min(t + klen, len(time))
+        I_pyr2[t:end] += kernel[:end - t]
+
+    if np.random.rand() < pff1:
+        end = min(t + klen, len(time))
+        I_ff1[t:end] += kernel[:end - t]
+
+    if np.random.rand() < pff2:
+        end = min(t + klen, len(time))
+        I_ff2[t:end] += kernel[:end - t]
+
+# map into neuron inputs (ONLY source of external current)
+Iext = np.zeros((N, len(time)))
+Iext[PYR1] = I_pyr1
+Iext[PYR2] = I_pyr2
+Iext[FF1]  = I_ff1
+Iext[FF2]  = I_ff2
+
+# =====================================
+# State variables
+# =====================================
+V = np.zeros((N, len(time)))
+vth = np.zeros((N, len(time)))
+spikes = np.zeros((N, len(time)))
+
+for i in range(N):
+    V[i, 0] = V0[i]
+    vth[i, 0] = vt[i]
+
+rfon = np.zeros(N)
+rftimer = np.ones(N) * np.inf
+
+# =====================================
+# Simulation
+# =====================================
+for t in range(1, len(time)):
+
+    for post in range(N):
+
+        Isyn = np.sum(W[:, post] * spikes[:, t-1])
+        I = Iext[post, t-1] + Isyn
+
+        i_ion = gL[post] * (V[post, t-1] - V0[post])
+        dVdt = (1 / C_m[post]) * (I - i_ion)
+
+        V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+        dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+        vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+        if rftimer[post] != np.inf:
+            rftimer[post] -= dt
+
+        if rftimer[post] <= 0:
+            rftimer[post] = np.inf
+            rfon[post] = False
+
+        if V[post, t] > vth[post, t]:
+
+            spikes[post, t] = 1
+            rfon[post] = True
+            rftimer[post] = rf
+
+            vth[post, t] += (
+                alpha[post][0]
+                + alpha[post][1] * (V[post, t] / vt[post])
+                + alpha[post][2] * (V[post, t] / vt[post])**2
+            )
+
+            V[post, t] = vr[post]
+
+# =====================================
+# Plot
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(7, 1, figsize=(12, 14), sharex=True)
+
+ax[0].plot(time, I_pyr1, label="PYR1 input")
+ax[0].plot(time, I_pyr2, label="PYR2 input")
+ax[0].plot(time, I_ff1, label="FF1 input")
+ax[0].plot(time, I_ff2, label="FF2 input")
+ax[0].set_ylabel("Input")
+ax[0].legend(fontsize=8)
+
+for i in range(6):
+    ax[i+1].plot(time, V[i], label="V")
+    ax[i+1].plot(time, vth[i], "--", label="Vth")
+    ax[i+1].set_ylabel(names[i])
+    ax[i+1].legend(fontsize=8, loc="upper right")
+
+plt.tight_layout()
+plt.show()
+
+#%% Input current plots (spike arrivals + 4 kernel inputs)
+# =====================================
+# 5-panel plot with aligned spike event markers
+# =====================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -----------------------------
+# USER PARAMETERS (change these)
+# -----------------------------
+dt = 1e-4
+T = 0.1
+
+rate = 100          # Hz Poisson drive
+pfire = 0.5         # probability of activating each input
+
+td = 2e-3
+tr = 0.5e-3
+tmax = 20e-3
+Aext = 2e-9
+
+fs = 15
+
+# -----------------------------
+# TIME
+# -----------------------------
+time = np.arange(0, T, dt)
+
+# -----------------------------
+# KERNEL
+# -----------------------------
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    t = np.arange(0, tmax, dt)
+    A = scale_I / (-(tr/td)**(td/(td-tr)) + (tr/td)**(tr/(td-tr)))
+    kernel = A * (np.exp(-t / td) - np.exp(-t / tr))
+    return kernel
+
+kernel = make_normalized_template(td, tr, tmax, dt, Aext)
+klen = len(kernel)
+
+# -----------------------------
+# INPUT SETUP (4 sources)
+# -----------------------------
+I = [np.zeros(len(time)) for _ in range(4)]
+
+labels = [
+    "Spike arrival\ntimes",
+    "PYR1 input\ncurrent (nA)",
+    "PYR2 input\ncurrent (nA)",
+    "FF1 input\ncurrent (nA)",
+    "FF2 input\ncurrent (nA)"
+]
+
+p = [pfire, pfire, pfire, pfire]
+
+# Poisson drive
+spike_drive = np.random.rand(len(time)) < rate * dt
+spike_times = time[spike_drive]
+
+# -----------------------------
+# BUILD INPUTS
+# -----------------------------
+for t in np.where(spike_drive)[0]:
+    for i in range(4):
+        if np.random.rand() < p[i]:
+            end = min(t + klen, len(time))
+            I[i][t:end] += kernel[:end - t]
+#%% plotting
+
+# -----------------------------
+# PLOT
+# -----------------------------
+
+fs = 20
+
+fig, ax = plt.subplots(5, 1, figsize=(12, 10), sharex=True)
+
+# spike arrivals (black full-height markers in axis coordinates)
+ax[0].vlines(
+    spike_times,
+    ymin=0,
+    ymax=1,
+    transform=ax[0].get_xaxis_transform(),
+    colors='k'
+)
+
+ax[0].set_ylabel(labels[0], fontsize=fs)
+ax[0].tick_params(axis='both', labelsize=fs)
+ax[0].set_yticks([])
+ax[0].set_xticks([])
+
+# same spike markers in ALL other subplots (red, alpha=0.3)
+for i in range(4):
+    ax[i+1].vlines(
+        spike_times,
+        ymin=0,
+        ymax=1,
+        transform=ax[i+1].get_xaxis_transform(),
+        colors='r',
+        alpha=0.3
+    )
+
+    ax[i+1].plot(time, I[i] * 1e9, linewidth=5)
+    ax[i+1].set_ylabel(labels[i+1], fontsize=fs)
+    ax[i+1].tick_params(axis='both', labelsize=fs)
+
+ax[-1].set_xlabel("Time (s)", fontsize=fs)
+ax[-1].tick_params(axis='both', labelsize=fs)
+
+plt.tight_layout()
+plt.show()
+#%% 4 - Firing rate vs input frequency (UPDATED: kernel-based input, 4 sources only)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+dt = 1e-4
+T = 10
+time = np.arange(0, T, dt)
+
+rf = 1e-3
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1]  = 35e-9
+W[PYR1, FB2]  = 35e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1]  = 2e-9
+W[PYR2, FB2]  = 2e-9
+
+sfb = -2e-9
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2]  = sfb
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1]  = sfb
+
+sff = -2e-9
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2]  = sff
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1]  = sff
+
+# =====================================
+# Kernel definition
+# =====================================
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    t = np.arange(0, tmax, dt)
+    A = scale_I / (-(tr/td)**(td/(td-tr)) + (tr/td)**(tr/(td-tr)))
+    template = A * (np.exp(-t / td) - np.exp(-t / tr))
+    return t, template
+
+# =====================================
+# Input settings
+# =====================================
+input_rates = np.arange(0, 101, 5)
+output_rates = np.zeros((N, len(input_rates)))
+
+pfire = 0.5
+ppyr1 = pfire
+ppyr2 = pfire
+pff1  = pfire
+pff2  = pfire
+
+Aext = 2e-9
+
+td = 2e-3
+tr = 0.5e-3
+tmax = 20e-3
+
+_, kernel = make_normalized_template(td, tr, tmax, dt, Aext)
+klen = len(kernel)
+
+# =====================================
+# Sweep simulation
+# =====================================
+for k, rate in enumerate(input_rates):
+
+    print(f"\r{100*(k+1)/len(input_rates):5.1f}% complete (input rate = {rate} Hz)", end="")
+
+    spike_drive = np.random.rand(len(time)) < rate * dt
+
+    # 4 input traces
+    I_pyr1 = np.zeros(len(time))
+    I_pyr2 = np.zeros(len(time))
+    I_ff1  = np.zeros(len(time))
+    I_ff2  = np.zeros(len(time))
+
+    # build kernel-based inputs
+    for t in np.where(spike_drive)[0]:
+
+        if np.random.rand() < ppyr1:
+            end = min(t + klen, len(time))
+            I_pyr1[t:end] += kernel[:end - t]
+
+        if np.random.rand() < ppyr2:
+            end = min(t + klen, len(time))
+            I_pyr2[t:end] += kernel[:end - t]
+
+        if np.random.rand() < pff1:
+            end = min(t + klen, len(time))
+            I_ff1[t:end] += kernel[:end - t]
+
+        if np.random.rand() < pff2:
+            end = min(t + klen, len(time))
+            I_ff2[t:end] += kernel[:end - t]
+
+    Iext = np.zeros((N, len(time)))
+    Iext[PYR1] = I_pyr1
+    Iext[PYR2] = I_pyr2
+    Iext[FF1]  = I_ff1
+    Iext[FF2]  = I_ff2
+
+    # =====================================
+    # Network simulation
+    # =====================================
+    V = np.zeros((N, len(time)))
+    vth = np.zeros((N, len(time)))
+    spikes = np.zeros((N, len(time)))
+
+    for i in range(N):
+        V[i, 0] = V0[i]
+        vth[i, 0] = vt[i]
+
+    rfon = np.zeros(N, dtype=bool)
+    rftimer = np.ones(N) * np.inf
+
+    for t in range(1, len(time)):
+
+        for post in range(N):
+
+            Isyn = np.sum(W[:, post] * spikes[:, t-1])
+            I = Iext[post, t-1] + Isyn
+
+            i_ion = gL[post] * (V[post, t-1] - V0[post])
+            dVdt = (I - i_ion) / C_m[post]
+
+            V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+            dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+            vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+            if rftimer[post] != np.inf:
+                rftimer[post] -= dt
+            if rftimer[post] <= 0:
+                rftimer[post] = np.inf
+                rfon[post] = False
+
+            if V[post, t] > vth[post, t]:
+
+                spikes[post, t] = 1
+                rfon[post] = True
+                rftimer[post] = rf
+
+                vth[post, t] += (
+                    alpha[post][0]
+                    + alpha[post][1] * (V[post, t] / vt[post])
+                    + alpha[post][2] * (V[post, t] / vt[post])**2
+                )
+
+                V[post, t] = vr[post]
+
+    # =====================================
+    # firing rate extraction
+    # =====================================
+    for neuron in range(N):
+        spike_times = time[spikes[neuron] == 1]
+
+        if len(spike_times) >= 2:
+            isi = np.diff(spike_times)
+            output_rates[neuron, k] = 1 / np.mean(isi)
+        else:
+            output_rates[neuron, k] = 0
+
+print("\nDone.")
+#%%  Plot of firing rates vs input frequency
+# =====================================
+# Plot (3x2) - SAME FORMAT + fs=15 + y<=x check
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(3, 2, figsize=(10, 10), sharex=False)
+ax = ax.flatten()
+
+for neuron in range(N):
+
+    x = input_rates
+    y = output_rates[neuron]#+10 # for checking for errors
+
+    # check violations
+    violation = y > x
+
+    # plot normal points
+    ax[neuron].plot(
+        x[~violation],
+        y[~violation],
+        '-o',
+        linewidth=2
+    )
+
+    # plot violating points in red
+    ax[neuron].plot(
+        x[violation],
+        y[violation],
+        'ro'
+    )
+
+    ax[neuron].set_title(names[neuron], fontsize=fs)
+    ax[neuron].set_ylabel("Mean firing frequency (Hz)", fontsize=fs)
+    ax[neuron].set_xlabel("Input frequency (Hz)", fontsize=fs)
+    ax[neuron].tick_params(axis='both', labelsize=fs)
+
+    if np.any(violation):
+        ax[neuron].text(
+            0.05, 0.9,
+            "output > input frequency",
+            transform=ax[neuron].transAxes,
+            fontsize=fs,
+            color='red',
+            verticalalignment='top'
+        )
+
+plt.tight_layout()
+plt.show()
+
+#%% 5 - random stimulation for calibrating parameters
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+    
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1 ] = 35e-9
+W[PYR1, FB2 ] = 35e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1 ] = 2e-9
+W[PYR2, FB2 ] = 2e-9
+
+sfb = -2e-9
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2 ] = sfb
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1 ] = sfb
+
+sff = -2e-9
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2 ] = sff
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1 ] = sff
+
+
+# For calibration turn everything off
+# W=0*W
+
+# =====================================
+# Simulation setup
+# =====================================
+T = 20
+navgs = 20
+dt = 1e-4
+time = np.arange(0, T, dt)
+rf = 1e-3
+
+rfon = np.zeros(N)
+rftimer = np.ones(N) * np.inf
+
+#         SOM       FB       FF
+noise = [0.146e-9, 2.75e-9, 2.95e-9]
+# ----------------   SOM    FB     FF
+# output should be:  2.6     9     7
+
+def getnoise(noise, i):
+    if i in [0, 1]:
+        return np.random.normal(0, noise[0])
+    if i in [2, 3]:
+        return np.random.normal(0, noise[1])
+    return np.random.normal(0, noise[2])
+
+# =====================================
+# NAVGS SIMULATIONS
+# =====================================
+
+rate_acc = np.zeros((navgs, N))
+
+for run in range(navgs):
+
+    V = np.zeros((N, len(time)))
+    vth = np.zeros((N, len(time)))
+    spikes = np.zeros((N, len(time)))
+    
+        # Initialize membrane potential and threshold
+    V[:, 0] = V0
+    vth[:, 0] = vt
+
+    rfon = np.zeros(N)
+    rftimer = np.ones(N) * np.inf
+
+    for t in range(1, len(time)):
+        for post in range(N):
+
+            Inoise = getnoise(noise, post)
+            
+            Isyn = np.sum(W[:, post] * spikes[:, t-1])
+            I = Isyn+Inoise
+
+            i_ion = gL[post] * (V[post, t-1] - V0[post])
+            dVdt = (1 / C_m[post]) * (I - i_ion)
+
+            V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+            dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+            vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+            if rftimer[post] != np.inf:
+                rftimer[post] -= dt
+            if rftimer[post] <= 0:
+                rftimer[post] = np.inf
+                rfon[post] = False
+
+            if V[post, t] > vth[post, t]:
+
+                spikes[post, t] = 1
+                rfon[post] = True
+                rftimer[post] = rf
+
+                vth[post, t] += (
+                    alpha[post][0]
+                    + alpha[post][1] * (V[post, t] / vt[post])
+                    + alpha[post][2] * (V[post, t] / vt[post])**2
+                )
+
+                V[post, t] = vr[post]
+
+    # =====================================
+    # compute firing rate for THIS run
+    # =====================================
+    for i in range(N):
+        spike_times = time[spikes[i] == 1]
+
+        if len(spike_times) > 1:
+            isi = np.diff(spike_times)
+            rate_acc[run, i] = 1.0 / np.mean(isi)
+        else:
+            rate_acc[run, i] = np.nan
+
+    # keep last run for plotting
+    if run == navgs - 1:
+        V_last = V.copy()
+        vth_last = vth.copy()
+        spikes_last = spikes.copy()
+
+# =====================================
+# FINAL RESULTS
+# =====================================
+mean_rate = np.nanmean(rate_acc, axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+# =====================================
+# Plot (LAST RUN ONLY - unchanged structure)
+# =====================================
+fs = 15
+
+fig, ax = plt.subplots(6, 1, figsize=(12, 12), sharex=True)
+
+for i in range(6):
+
+    if not np.isnan(mean_rate[i]):
+        rate_text = f", rate = {mean_rate[i]:.2f} Hz"
+    else:
+        rate_text = ", rate = N/A"
+
+    ax[i].plot(time, V_last[i], label="V")
+    # ax[i].plot(time, vth_last[i], "--", label="Vth")
+
+    ax[i].set_ylabel(names[i], fontsize=fs)
+    ax[i].set_title(names[i] + rate_text, fontsize=fs)
+
+    ax[i].legend(fontsize=fs-2, loc="upper right")
+    ax[i].tick_params(axis='both', labelsize=fs)
+
+ax[-1].set_xlabel("Time", fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+
+#%% 5 - random stimulation for calibrating parameters (with progress bar+plot+dots)
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+# =====================================
+# Simulation parameters
+# =====================================
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+spyr=1e-9
+spyrfb=35e-9
+W[PYR1, PYR2] = spyr
+W[PYR1, FB1 ] = spyrfb
+W[PYR1, FB2 ] = spyrfb
+
+W[PYR2, PYR1] = spyr
+W[PYR2, FB1 ] = spyrfb
+W[PYR2, FB2 ] = spyrfb
+
+sfb = -2e-9
+W[FB1, PYR1] = sfb # connection added
+W[FB1, PYR2] = sfb # can be different than PYR2->FB1
+W[FB1, FB2 ] = sfb
+W[FB2, PYR1] = sfb
+W[FB2, PYR2] = sfb
+W[FB2, FB1 ] = sfb
+
+sff = -2e-9
+sffpyr=-2.0e-9
+W[FF1, PYR1] = sffpyr
+W[FF1, PYR2] = sffpyr
+W[FF1, FF2 ] = sff
+W[FF2, PYR1] = sffpyr
+W[FF2, PYR2] = sffpyr
+W[FF2, FF1 ] = sff
+
+# =====================================
+# Simulation setup
+# =====================================
+T = 0.1
+navgs = 1
+ttype=9 # 0-PYR/PYR, 1-FB/PYR, 2-FF/PYR
+
+dt = 1e-4
+time = np.arange(0, T, dt)
+rf = 1e-3
+
+if ttype==0:
+    # PYR and PYR off 2301
+    W[1,0],W[0,1]=0,0
+if ttype==1:
+    # FB and PYR off 2301
+    W[2,0],W[3,0],W[2,1],W[3,1]=0,0,0,0
+    W[0,2],W[0,3],W[1,2],W[1,3]=0,0,0,0
+if ttype==2:
+    # FF and PYR off 2301
+    W[4,0],W[5,0],W[4,1],W[5,1]=0,0,0,0
+    W[0,4],W[0,5],W[1,4],W[1,5]=0,0,0,0
+
+#         SOM       FB       FF
+noise = np.array([0.17e-9, 2.5e-9, 2.98e-9])
+# output:  2.6      9      7
+
+def getnoise(noise, i):
+    if i in [0, 1]:
+        return np.random.normal(0, noise[0])
+    if i in [2, 3]:
+        return np.random.normal(0, noise[1])
+    return np.random.normal(0, noise[2])
+
+# =====================================
+# STORAGE
+# =====================================
+rate_acc = np.zeros((navgs, N))
+
+V_last = None
+spike_peak_last = None
+
+# =====================================
+# SIMULATIONS
+# =====================================
+for run in tqdm(range(navgs), desc="Running simulations", unit="run"):
+
+    V = np.zeros((N, len(time)))
+    vth = np.zeros((N, len(time)))
+    spikes = np.zeros((N, len(time)))
+
+    if run == navgs - 1:
+        spike_peak_last = np.full((N, len(time)), np.nan)
+
+    V[:, 0] = V0
+    vth[:, 0] = vt
+
+    rfon = np.zeros(N)
+    rftimer = np.ones(N) * np.inf
+
+    for t in range(1, len(time)):
+        for post in range(N):
+
+            Inoise = getnoise(noise, post)
+            Isyn = np.sum(W[:, post] * spikes[:, t-1])
+            I = Isyn + Inoise
+
+            i_ion = gL[post] * (V[post, t-1] - V0[post])
+            dVdt = (1 / C_m[post]) * (I - i_ion)
+
+            V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+            dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+            vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+            if rftimer[post] != np.inf:
+                rftimer[post] -= dt
+            if rftimer[post] <= 0:
+                rftimer[post] = np.inf
+                rfon[post] = False
+
+            if V[post, t] > vth[post, t]:
+
+                spikes[post, t] = 1
+
+                if run == navgs - 1:
+                    spike_peak_last[post, t] = V[post, t]
+
+                rfon[post] = True
+                rftimer[post] = rf
+
+                vth[post, t] += (
+                    alpha[post][0]
+                    + alpha[post][1] * (V[post, t] / vt[post])
+                    + alpha[post][2] * (V[post, t] / vt[post])**2
+                )
+
+                V[post, t] = vr[post]
+
+    if run == navgs - 1:
+        V_last = V.copy()
+
+    # =====================================
+    # firing rates
+    # =====================================
+    for i in range(N):
+        spike_times = time[spikes[i] == 1]
+
+        if len(spike_times) > 1:
+            isi = np.diff(spike_times)
+            rate_acc[run, i] = 1.0 / np.mean(isi)
+        else:
+            rate_acc[run, i] = np.nan
+
+# =====================================
+# RESULTS
+# =====================================
+mean_rate = np.nanmean(rate_acc, axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+# =====================================
+# PLOT
+# =====================================
+fs = 15
+fig, ax = plt.subplots(6, 1, figsize=(12, 12), sharex=True)
+
+for i in range(6):
+
+    if not np.isnan(mean_rate[i]):
+        rate_text = f", rate = {mean_rate[i]:.2f} Hz"
+    else:
+        rate_text = ", rate = N/A"
+
+    ax[i].plot(time, V_last[i], label="V")
+
+    mask = ~np.isnan(spike_peak_last[i])
+    ax[i].scatter(
+        time[mask],
+        spike_peak_last[i, mask],
+        s=60,
+        facecolors="black",
+        edgecolors="black",
+        linewidths=1.2,
+        zorder=5,
+        label="Spike"
+    )
+
+    ax[i].set_ylabel(names[i], fontsize=fs)
+    ax[i].set_title(names[i] + rate_text, fontsize=fs)
+    ax[i].legend(fontsize=fs-2, loc="upper right")
+    ax[i].tick_params(axis='both', labelsize=fs)
+
+ax[-1].set_xlabel("Time (sec)", fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% 5 - plotting the navgs averages (with spike peak markers)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =====================================
+# Simulation parameters
+# =====================================
+N = 6
+
+PYR1, PYR2, FB1, FB2, FF1, FF2 = range(6)
+names = ["PYR1", "PYR2", "FB1", "FB2", "FF1", "FF2"]
+
+PYR = [PYR1, PYR2]
+FB  = [FB1, FB2]
+FF  = [FF1, FF2]
+
+# =====================================
+# Weight matrix
+# =====================================
+W = np.zeros((N, N))
+
+W[PYR1, PYR2] = 1e-9
+W[PYR1, FB1 ] = 35e-9
+W[PYR1, FB2 ] = 35e-9
+
+W[PYR2, PYR1] = 1e-9
+W[PYR2, FB1 ] = 2e-9
+W[PYR2, FB2 ] = 2e-9
+
+sfb = -2e-9
+W[FB1, PYR2] = -2.0e-9
+W[FB1, FB2 ] = sfb
+W[FB2, PYR1] = -2.0e-9
+W[FB2, PYR2] = -2.0e-9
+W[FB2, FB1 ] = sfb
+
+sff = -2e-9
+W[FF1, PYR1] = -2.0e-9
+W[FF1, PYR2] = -2.0e-9
+W[FF1, FF2 ] = sff
+W[FF2, PYR1] = -2.0e-9
+W[FF2, PYR2] = -2.0e-9
+W[FF2, FF1 ] = sff
+
+# W=0*W # for calibration
+
+# =====================================
+# Group-symmetric parameters
+# =====================================
+V0 = np.zeros(N)
+C_m = np.zeros(N)
+vr = np.zeros(N)
+gL = np.zeros(N)
+vt = np.zeros(N)
+tauvth = np.zeros(N)
+alpha = np.zeros((N, 3))
+
+for i in PYR:
+    V0[i] = -78e-3
+    C_m[i] = 300e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -77e-3
+    tauvth[i] = 7e-3
+    alpha[i] = [75e-3, 0e-3, 0e-3]
+
+for i in FB:
+    V0[i] = -78e-3
+    C_m[i] = 250e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(50e6)
+    vt[i] = -62e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+for i in FF:
+    V0[i] = -78e-3
+    C_m[i] = 650e-12
+    vr[i] = -78e-3
+    gL[i] = 1/(120e6)
+    vt[i] = -70e-3
+    tauvth[i] = 1e-3
+    alpha[i] = [1e-3, 1e-3, 1e-3]
+
+# =====================================
+# Simulation setup
+# =====================================
+T = 0.07
+navgs = 5
+ttype=0 # 0-PYR/PYR, 1-FB/PYR, 2-FF/PYR
+
+dt = 1e-4
+time = np.arange(0, T, dt)
+rf = 1e-3
+
+if ttype == 0:
+    W[PYR2, PYR1], W[PYR1, PYR2] = 0, 0
+
+if ttype == 1:
+    W[FB1, PYR1], W[FB2, PYR1], W[FB1, PYR2], W[FB2, PYR2] = 0, 0, 0, 0
+    W[PYR1, FB1], W[PYR1, FB2], W[PYR2, FB1], W[PYR2, FB2] = 0, 0, 0, 0
+
+if ttype == 2:
+    W[FF1, PYR1], W[FF2, PYR1], W[FF1, PYR2], W[FF2, PYR2] = 0, 0, 0, 0
+    W[PYR1, FF1], W[PYR1, FF2], W[PYR2, FF1], W[PYR2, FF2] = 0, 0, 0, 0
+
+noise=np.array([0.28e-9, #pyr, output mean is 2.6 Hz
+                2.63e-9,#ff, output mean is 7 Hz
+                3.93e-9])#fb, output mean is 9 Hz
+
+def getnoise(noise, i):
+    if i in [0, 1]:
+        return np.random.normal(0, noise[0])
+    if i in [2, 3]:
+        return np.random.normal(0, noise[1])
+    return np.random.normal(0, noise[2])
+
+# =====================================
+# STORAGE
+# =====================================
+rate_acc = np.zeros((navgs, N))
+V_all = np.zeros((navgs, N, len(time)))
+vth_all = np.zeros((navgs, N, len(time)))
+spikes_all = np.zeros((navgs, N, len(time)))
+spike_peak = np.full((navgs, N, len(time)), np.nan)
+
+# =====================================
+# SIMULATION
+# =====================================
+for run in range(navgs):
+
+    V = np.zeros((N, len(time)))
+    vth = np.zeros((N, len(time)))
+    spikes = np.zeros((N, len(time)))
+
+    V[:, 0] = V0
+    vth[:, 0] = vt
+
+    rfon = np.zeros(N)
+    rftimer = np.ones(N) * np.inf
+
+    for t in range(1, len(time)):
+        for post in range(N):
+
+            Inoise = getnoise(noise, post)
+            Isyn = np.sum(W[:, post] * spikes[:, t-1])
+            I = Isyn + Inoise
+
+            i_ion = gL[post] * (V[post, t-1] - V0[post])
+            dVdt = (1 / C_m[post]) * (I - i_ion)
+
+            V[post, t] = V[post, t-1] + dt * dVdt * (1 - rfon[post])
+
+            dvthdt = -(vth[post, t-1] - vt[post]) / tauvth[post]
+            vth[post, t] = vth[post, t-1] + dt * dvthdt
+
+            if rftimer[post] != np.inf:
+                rftimer[post] -= dt
+            if rftimer[post] <= 0:
+                rftimer[post] = np.inf
+                rfon[post] = False
+
+            # =====================================
+            # SPIKE CONDITION (store TRUE PEAK)
+            # =====================================
+            if V[post, t] > vth[post, t]:
+
+                spikes[post, t] = 1
+
+                spike_peak[run, post, t] = V[post, t]
+
+                rfon[post] = True
+                rftimer[post] = rf
+
+                vth[post, t] += (
+                    alpha[post][0]
+                    + alpha[post][1] * (V[post, t] / vt[post])
+                    + alpha[post][2] * (V[post, t] / vt[post])**2
+                )
+
+                V[post, t] = vr[post]
+
+    V_all[run] = V
+    vth_all[run] = vth
+    spikes_all[run] = spikes
+
+    for i in range(N):
+        spike_times = time[spikes[i] == 1]
+        if len(spike_times) > 1:
+            isi = np.diff(spike_times)
+            rate_acc[run, i] = 1.0 / np.mean(isi)
+        else:
+            rate_acc[run, i] = np.nan
+
+# =====================================
+# RESULTS
+# =====================================
+mean_rate = np.nanmean(rate_acc, axis=0)
+std_rate = np.nanstd(rate_acc, axis=0)
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+# =====================================
+# PLOT (consistent color per run + styled markers)
+# =====================================
+fs = 15
+fig, ax = plt.subplots(6, 1, figsize=(12, 12), sharex=True)
+
+colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+for i in range(6):
+
+    for run in range(navgs):
+
+        c = colors[run % len(colors)]
+
+        ax[i].plot(time, V_all[run, i], color=c)
+
+        mask = ~np.isnan(spike_peak[run, i])
+
+        ax[i].scatter(
+            time[mask],
+            spike_peak[run, i, mask],
+            s=30,
+            facecolors="black",
+            edgecolors=c,
+            linewidths=1.5,
+            zorder=5
+        )
+
+    ax[i].set_ylabel(names[i], fontsize=fs)
+    ax[i].tick_params(axis='both', labelsize=fs)
+
+ax[-1].set_xlabel("Time (sec)", fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% 5 - GOOD - random stimulation with independent synaptic currents
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+W=np.zeros((N,N))
+
+spyr=4.75e-12 #good
+spyrfb=17.46e-12 #GOOD, 0.4e-3 should be peak amplitude of current pulse
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+sfb=-203.8e-12 #good
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+sff=-203.8e-12 #good
+sffpyr=-203.8e-12#good
+
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+T=1
+navgs=1
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+ttype=9
+if ttype == 0:
+    W[PYR2, PYR1], W[PYR1, PYR2] = 0, 0
+
+if ttype == 1:
+    W[FB1, PYR1], W[FB2, PYR1], W[FB1, PYR2], W[FB2, PYR2] = 0, 0, 0, 0
+
+if ttype == 2:
+    W[FF1, PYR1], W[FF2, PYR1], W[FF1, PYR2], W[FF2, PYR2] = 0, 0, 0, 0
+
+noise=np.array([0.28e-9, #pyr, output mean is 2.6 Hz
+                2.63e-9,#ff, output mean is 7 Hz
+                3.93e-9])#fb, output mean is 9 Hz
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[1])
+    return np.random.normal(0,noise[2])#FF1 or FF2
+
+rate_acc=np.zeros((navgs,N))
+
+V_last=None
+I_last=None
+spike_peak_last=None
+Vth_last=None
+
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+
+    # independent synaptic current for every connection
+    Ispike=np.zeros((N,N))
+
+    if run==navgs-1:
+        spike_peak_last=np.full((N,len(time)),np.nan)
+        I_last=np.zeros((N,len(time)))
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    for t in range(1,len(time)):
+
+        # decay each presynaptic->postsynaptic current separately
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        # store total incoming current
+        if run==navgs-1:
+            for post in range(N):
+                I_last[post,t]=np.sum(Ispike[:,post])
+
+        for post in range(N):
+
+            Inoise=getnoise(noise,post)
+
+            # total current into neuron
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            if V[post,t]>vth[post,t]:
+
+                spikes[post,t]=1
+
+                if run==navgs-1:
+                    spike_peak_last[post,t]=V[post,t]
+
+                rfon[post]=True
+                rftimer[post]=rf
+
+                # add current to every postsynaptic target
+                for target in range(N):
+                    if W[post,target]!=0:
+                        Ispike[post,target]+=W[post,target]
+
+                vth[post,t]+=(
+                    alpha[post,0]
+                    +alpha[post,1]*(V[post,t]/vt[post])
+                    +alpha[post,2]*(V[post,t]/vt[post])**2
+                )
+
+                V[post,t]=vr[post]
+
+    if run==navgs-1:
+        V_last=V.copy()
+        Vth_last=vth.copy()
+
+    for i in range(N):
+        spike_times=time[spikes[i]==1]
+        if len(spike_times)>1:
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+        else:
+            rate_acc[run,i]=np.nan
+            
+mean_rate=np.nanmean(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+# =============================================================================
+# # %%
+# =============================================================================
+fs=15
+
+fig,ax=plt.subplots(6,1,figsize=(12,12),sharex=True)
+
+for i in range(6):
+
+    rate_text=f", rate = {mean_rate[i]:.2f} Hz, STD={np.std(rate_acc[:,i]):.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A"
+
+    ax[i].plot(time,V_last[i],label="V")
+    ax[i].plot(time,Vth_last[i],label="Vth")
+
+    mask=~np.isnan(spike_peak_last[i])
+    ax[i].scatter(
+        time[mask],
+        spike_peak_last[i,mask],
+        s=60,
+        color="black",
+        zorder=5,
+        label="Spike"
+    )
+
+    ax[i].set_ylabel(names[i],fontsize=fs)
+    ax[i].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i].legend(fontsize=fs-2,loc="upper right")
+    ax[i].tick_params(axis="both",labelsize=fs)
+
+ax[-1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+# =============================================================================
+# # Membrane potential + current plot
+# fs=15
+# 
+# fig,ax=plt.subplots(6,2,figsize=(14,14),sharex=True)
+# 
+# for i in range(6):
+# 
+#     rate_text=f", rate = {mean_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A"
+# 
+#     # membrane voltage
+#     ax[i,0].plot(time,V_last[i],label="V")
+# 
+#     mask=~np.isnan(spike_peak_last[i])
+#     ax[i,0].scatter(
+#         time[mask],
+#         spike_peak_last[i,mask],
+#         s=60,
+#         color="black",
+#         zorder=5,
+#         label="Spike"
+#     )
+# 
+#     ax[i,0].set_ylabel(names[i],fontsize=fs)
+#     ax[i,0].set_title(names[i]+rate_text+" Voltage",fontsize=fs)
+#     ax[i,0].legend(fontsize=fs-2,loc="upper right")
+# 
+#     # total synaptic current
+#     ax[i,1].plot(time,I_last[i]*1e9,label="I_syn")
+# 
+#     ax[i,1].set_title(names[i]+" Synaptic Current",fontsize=fs)
+#     ax[i,1].set_ylabel("nA",fontsize=fs)
+#     ax[i,1].legend(fontsize=fs-2,loc="upper right")
+# 
+#     ax[i,0].tick_params(axis="both",labelsize=fs)
+#     ax[i,1].tick_params(axis="both",labelsize=fs)
+# 
+# ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
+# ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
+# 
+# plt.tight_layout()
+# plt.show()
+# =============================================================================
+
+# def dist(V_last,i):
+#     return np.max(V_last[i])-np.min(V_last[i])
+# dists=[dist(V_last, i) for i in range(len(V_last))]
+# print(np.array(dists)*1000)
+#%% 5 -
+
+plt.plot(np.linspace(0,T,len(V_last[0])),1000*V_last[0],label='membrane potential')
+plt.plot(np.linspace(0,T,len(Vth_last[0])), 1000*Vth_last[0],label='threshold potential')
+# plt.legend(fontsize=fs)
+plt.xlabel('Time (sec)',fontsize=fs)
+plt.ylabel('Voltage (mV)',fontsize=fs)
+plt.tick_params(axis='both', labelsize=fs)
+
+#%% 5 - plotting all the results in a timeline plot above it
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Patch
+
+# Updated with the exact firing rate mean and STD values from your uploaded chart panels
+data = {
+    'C': {
+        'PYR1': (2.57, 0.34), 'PYR2': (2.63, 0.46),
+        'FB1': (7.09, 0.60),  'FB2': (7.17, 0.73),
+        'FF1': (8.82, 0.83),  'FF2': (8.92, 1.3)
+    },
+    'KPYR': {
+        'PYR1': (2.67, 0.32), 'PYR2': (2.59, 0.26),
+        'FB1': (7.05, 0.73),  'FB2': (6.76, 0.57),
+        'FF1': (9.04, 0.92),  'FF2': (8.74, 0.68)
+    },
+    'KFB': {
+        'PYR1': (5.57, 0.54), 'PYR2': (5.61, 0.48),
+        'FB1': (7.07, 0.51),  'FB2': (7.02, 0.59),
+        'FF1': (8.74, 0.83),  'FF2': (9, 0.94)
+    },
+    'KFF': {
+        'PYR1': (5.83, 0.44), 'PYR2': (5.93, 0.35),
+        'FB1': (7.37, 0.52),  'FB2': (7.19, 0.45),
+        'FF1': (8.82, 0.98),  'FF2': (9.11, 1.16)
+    }
+}
+
+# Define color scheme by Neuron Type
+colors = {
+    'PYR1': 'maroon',
+    'PYR2': 'magenta',
+    'FB1': 'dodgerblue',
+    'FB2': 'blueviolet',
+    'FF1': 'limegreen',
+    'FF2': 'forestgreen'
+}
+
+neurons = ['PYR1', 'PYR2', 'FB1', 'FB2', 'FF1', 'FF2']
+conditions = ['C', 'KPYR', 'KFB', 'KFF']
+
+# Create plot
+fig, ax = plt.subplots(figsize=(11, 8.5))
+
+plot_data = []
+# Group by condition first, then by neuron type
+for cond in conditions:
+    for neur in neurons:
+        mean, std = data[cond][neur]
+        plot_data.append((mean, std, cond, neur))
+
+# Reverse list for correct top-down plotting order (C starts at the top y-index)
+plot_data.reverse()
+
+# Dictionary to track positions for condition-based section labeling on the Y axis
+condition_positions = {}
+
+for idx, (mean, std, cond, neur) in enumerate(plot_data):
+    # Plot using the neuron-specific color
+    ax.errorbar(mean, idx, xerr=std, fmt='o', color=colors[neur], capsize=4, elinewidth=1.5, markersize=6)
+    
+    # 1. Plot the neuron name to the left of its error whisker
+    text_x = mean - std - 0.12
+    ax.text(text_x, idx, neur, va='center', ha='right', fontsize=9.5, fontweight='bold', family='monospace', color=colors[neur])
+    
+    # 2. Plot the exact numerical values in slightly larger numbers above the mean point plot
+    num_text = f"{mean}±{std}"
+    ax.text(mean, idx + 0.20, num_text, va='bottom', ha='center', fontsize=9.0, family='monospace', color='dimgray')
+    
+    # Group row positions by condition to position center titles later
+    if cond not in condition_positions:
+        condition_positions[cond] = []
+    condition_positions[cond].append(idx)
+
+# Map conditions to clear display titles along the Y axis
+y_ticks = []
+y_labels = []
+condition_display_names = {'C': 'Calibration', 'KPYR': 'PYR Knockout', 'KFB': 'FB Knockout', 'KFF': 'FF Knockout'}
+
+for cond, positions in condition_positions.items():
+    # Target the middle vertical index of the block of 6 rows to place the text label
+    mid_point = np.mean(positions)
+    y_ticks.append(mid_point)
+    y_labels.append(condition_display_names[cond])
+
+# Set up clean Sectioned Y-axis with requested large fonts
+ax.set_yticks(y_ticks)
+ax.set_yticklabels(y_labels, fontsize=15, fontweight='bold')
+ax.set_xlabel('Firing Rate (Hz)', fontsize=15, fontweight='bold')
+ax.set_title('Neuron Firing Rates (Mean ± 1 STD) Stacked by Condition', fontsize=14, fontweight='bold', pad=20)
+
+# Clear boundary separator lines every 6 rows to outline condition blocks explicitly
+for i in range(6, len(plot_data), 6):
+    ax.axhline(i - 0.5, color='black', linestyle='-', alpha=0.15)
+
+ax.grid(axis='x', linestyle='--', alpha=0.5)
+ax.set_xlim(0, 11)
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.tick_params(axis='both', labelsize=15)
+
+# Custom legend for neuron types
+legend_elements = [Patch(facecolor=colors[n], label=n) for n in neurons]
+ax.legend(handles=legend_elements, loc='upper right', title='Neuron Types', frameon=True, facecolor='white', edgecolor='none')
+
+plt.tight_layout()
+plt.show()
+
+#%% 5 -  plot "navg" simulations
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+
+W=np.zeros((N,N))
+
+spyr=4.75e-12
+spyrfb=17.46e-12
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+
+sfb=-203.8e-12
+
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+
+sff=-203.8e-12
+sffpyr=-203.8e-12
+
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+
+T=0.07
+navgs=1
+ttype=2
+
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+
+if ttype == 0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype == 1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype == 2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+
+noise=np.array([
+    0.28e-9,
+    2.63e-9,
+    3.93e-9
+])
+
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[1])
+    return np.random.normal(0,noise[2])
+
+# =====================================
+# STORAGE FOR ALL NAVGS RUNS
+# =====================================
+
+rate_acc=np.zeros((navgs,N))
+
+V_all=np.zeros((navgs,N,len(time)))
+vth_all=np.zeros((navgs,N,len(time)))
+spikes_all=np.zeros((navgs,N,len(time)))
+
+spike_peak=np.full(
+    (navgs,N,len(time)),
+    np.nan
+)
+
+
+# =====================================
+# SIMULATION
+# =====================================
+
+for run in tqdm(
+    range(navgs),
+    desc="Running simulations",
+    unit="run"
+):
+
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+
+
+    # independent synaptic currents for every connection
+    Ispike=np.zeros((N,N))
+
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+
+
+    for t in range(1,len(time)):
+
+
+        # decay individual synaptic currents
+        for pre in range(N):
+
+            taui=taui_exc if pre in PYR else taui_inh
+
+            for post in range(N):
+
+                Ispike[pre,post]+=dt*(
+                    -Ispike[pre,post]/taui
+                )
+
+
+
+        for post in range(N):
+
+            Inoise=getnoise(
+                noise,
+                post
+            )
+
+
+            # total incoming synaptic current
+            Isyn=np.sum(
+                Ispike[:,post]
+            )
+
+            I=Isyn+Inoise
+
+
+            i_ion=gL[post]*(
+                V[post,t-1]-V0[post]
+            )
+
+
+            dVdt=(I-i_ion)/C_m[post]
+
+
+            V[post,t]=(
+                V[post,t-1]
+                +dt*dVdt*(1-rfon[post])
+            )
+
+
+            dvthdt=(
+                -(vth[post,t-1]-vt[post])
+                /tauvth[post]
+            )
+
+
+            vth[post,t]=(
+                vth[post,t-1]
+                +dt*dvthdt
+            )
+
+
+
+            if rftimer[post]!=np.inf:
+
+                rftimer[post]-=dt
+
+
+
+            if rftimer[post]<=0:
+
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+
+
+            # spike condition
+
+            if V[post,t]>vth[post,t]:
+
+                spikes[post,t]=1
+
+
+                # store true spike peak
+                spike_peak[run,post,t]=V[post,t]
+
+
+                rfon[post]=True
+                rftimer[post]=rf
+
+
+
+                # add synaptic current to targets
+                for target in range(N):
+
+                    if W[post,target]!=0:
+
+                        Ispike[post,target]+=W[post,target]
+
+
+
+                # adaptive threshold update
+
+                vth[post,t]+=(
+                    alpha[post,0]
+                    +alpha[post,1]*(V[post,t]/vt[post])
+                    +alpha[post,2]*(V[post,t]/vt[post])**2
+                )
+
+
+                V[post,t]=vr[post]
+
+
+
+    # =====================================
+    # STORE THIS RUN
+    # =====================================
+
+    V_all[run]=V
+    vth_all[run]=vth
+    spikes_all[run]=spikes
+
+
+
+    # =====================================
+    # FIRING RATE CALCULATION
+    # =====================================
+
+    for i in range(N):
+
+        spike_times=time[
+            spikes[i]==1
+        ]
+
+
+        if len(spike_times)>1:
+
+            isi=np.diff(
+                spike_times
+            )
+
+            rate_acc[run,i]=1/np.mean(isi)
+
+        else:
+
+            rate_acc[run,i]=np.nan
+            
+# =====================================
+# RESULTS
+# =====================================
+
+mean_rate=np.nanmean(
+    rate_acc,
+    axis=0
+)
+
+std_rate=np.nanstd(
+    rate_acc,
+    axis=0
+)
+
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+
+# =====================================
+# PLOT ALL NAVGS RUNS
+# =====================================
+
+fs=15
+
+
+fig,ax=plt.subplots(
+    6,
+    1,
+    figsize=(12,12),
+    sharex=True
+)
+
+
+colors=plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+
+for i in range(N):
+
+
+    rate_text=(
+        f", rate = {mean_rate[i]:.2f} Hz, "
+        f"STD={std_rate[i]:.2f} Hz"
+        if not np.isnan(mean_rate[i])
+        else ", rate = N/A"
+    )
+
+
+    for run in range(navgs):
+
+        c=colors[run % len(colors)]
+
+
+        # voltage trace
+        ax[i].plot(
+            time,
+            V_all[run,i]*1000,
+            color=c
+        )
+
+
+        # spike markers
+        mask=~np.isnan(spike_peak[run,i])
+
+
+        ax[i].scatter(
+            time[mask],
+            spike_peak[run,i,mask]*1000,
+            s=30,
+            facecolors="black",
+            edgecolors=c,
+            linewidths=1.5,
+            zorder=5
+        )
+
+
+    ax[i].set_ylabel(
+        names[i],
+        fontsize=fs
+    )
+
+
+# =============================================================================
+#     ax[i].set_title(
+#         names[i]+rate_text,
+#         fontsize=fs
+#     )
+# =============================================================================
+
+
+    ax[i].tick_params(
+        axis="both",
+        labelsize=fs
+    )
+
+
+ax[-1].set_xlabel(
+    "Time (sec)",
+    fontsize=fs
+)
+
+
+plt.tight_layout()
+
+plt.show()
+
+#%% 5 - plot "navg" averages of the simulations
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+W=np.zeros((N,N))
+
+spyr=4.75e-12
+spyrfb=17.46e-12
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+sfb=-203.8e-12
+
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+sff=-203.8e-12
+sffpyr=-203.8e-12
+
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+T=40
+navgs=1
+ttype=9
+
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+noise=np.array([0.28e-9,2.63e-9,3.93e-9])
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[2])
+    return np.random.normal(0,noise[1])
+
+# STORAGE FOR ALL NAVGS RUNS
+rate_acc=np.zeros((navgs,N))
+V_all=np.zeros((navgs,N,len(time)))
+vth_all=np.zeros((navgs,N,len(time)))
+spikes_all=np.zeros((navgs,N,len(time)))
+spike_peak=np.full((navgs,N,len(time)),np.nan)
+
+# SIMULATION
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+    Ispike=np.zeros((N,N))
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    for t in range(1,len(time)):
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        for post in range(N):
+            Inoise=getnoise(noise,post)
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            if V[post,t]>vth[post,t]:
+                spikes[post,t]=1
+                spike_peak[run,post,t]=V[post,t]
+                rfon[post]=True
+                rftimer[post]=rf
+
+                for target in range(N):
+                    if W[post,target]!=0:
+                        Ispike[post,target]+=W[post,target]
+
+                vth[post,t]+=(alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2)
+                V[post,t]=vr[post]
+
+    V_all[run]=V
+    vth_all[run]=vth
+    spikes_all[run]=spikes
+
+    # FIRING RATE CALCULATION
+    for i in range(N):
+        spike_times=time[spikes[i]==1]
+        if len(spike_times)>1:
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+        else:
+            rate_acc[run,i]=np.nan
+
+# RESULTS
+mean_rate=np.nanmean(rate_acc,axis=0)
+std_rate=np.nanstd(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+# PLOT ALL NAVGS RUNS
+fs=15
+
+fig,ax=plt.subplots(6,1,figsize=(12,12),sharex=True)
+
+colors=plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+for i in range(N):
+    rate_text=(f", rate = {mean_rate[i]:.2f} Hz, STD={std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A")
+
+    for run in range(navgs):
+        c=colors[run % len(colors)]
+
+        ax[i].plot(time,V_all[run,i]*1000,color=c)
+
+        mask=~np.isnan(spike_peak[run,i])
+
+        ax[i].scatter(time[mask],spike_peak[run,i,mask]*1000,s=30,facecolors="black",edgecolors=c,linewidths=1.5,zorder=5)
+
+    ax[i].set_ylabel(names[i],fontsize=fs)
+    ax[i].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i].tick_params(axis="both",labelsize=fs)
+
+ax[-1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% 6 - GOOD - 6x2 plot of the membrane potentials and threshold potentials
+# and the SV pools as a function of time
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+W=np.zeros((N,N))
+
+spyr=4.75e-12
+spyrfb=17.46e-12
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+sfb=-203.8e-12
+
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+sff=-203.8e-12
+sffpyr=-203.8e-12
+
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+MPYR1=10
+MFB1=10
+MFF1=10
+MPYR2=MPYR1
+MFB2=MFB1
+MFF2=MFF1
+M=[MPYR1,MPYR2,MFB1,MFB2,MFF1,MFF2]
+
+prPYR1=0.2
+prPYR2=0.2
+prFB1=0.2
+prFB2=0.2
+prFF1=0.2
+prFF2=0.2
+pr=[prPYR1,prPYR2,prFB1,prFB2,prFF1,prFF2]
+
+# replenishment rate coefficient
+kPYR1=1.0
+kFB1=1.0
+kFF1=1.0
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
+
+T=40
+navgs=10
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+ttype=9
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+noise=np.array([0.28e-9,2.63e-9,3.93e-9])
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[1])
+    return np.random.normal(0,noise[2])
+
+rate_acc=np.zeros((navgs,N))
+
+V_last=None
+I_last=None
+spike_peak_last=None
+Vth_last=None
+ndsv_last=None
+
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+
+    Ispike=np.zeros((N,N))
+
+    ndsv=np.array(M,dtype=int)
+    next_refill=np.full(N,np.inf)
+
+    if run==navgs-1:
+        spike_peak_last=np.full((N,len(time)),np.nan)
+        I_last=np.zeros((N,len(time)))
+        ndsv_last=np.zeros((N,len(time)))
+        ndsv_last[:,0]=ndsv
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    for t in range(1,len(time)):
+
+        # replenish docked synaptic vesicles
+        for post in range(N):
+
+            if t>=next_refill[post] and ndsv[post]<M[post]:
+                ndsv[post]+=1
+
+                if ndsv[post]<M[post]:
+                    rate=k[post]*(M[post]-ndsv[post])
+                    wait=np.random.exponential(1/rate)
+                    next_refill[post]=t+int(np.round(wait/dt))
+                else:
+                    next_refill[post]=np.inf
+
+        # store docked synaptic vesicles
+        if run==navgs-1:
+            ndsv_last[:,t]=ndsv
+
+        # decay each presynaptic->postsynaptic current separately
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        # store total incoming current
+        if run==navgs-1:
+            for post in range(N):
+                I_last[post,t]=np.sum(Ispike[:,post])
+
+        for post in range(N):
+
+            Inoise=getnoise(noise,post)
+
+            # total current into neuron
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            if V[post,t]>vth[post,t]:
+
+                spikes[post,t]=1
+
+                if run==navgs-1:
+                    spike_peak_last[post,t]=V[post,t]
+
+                rfon[post]=True
+                rftimer[post]=rf
+
+                # release vesicles and add current to every postsynaptic target
+                for target in range(N):
+
+                    if W[post,target]!=0:
+
+                        B=np.random.binomial(ndsv[post],pr[post])
+
+                        ndsv[post]-=B
+
+                        Ispike[post,target]+=W[post,target]*B
+
+                        # schedule replenishment after vesicle depletion
+                        if B>0 and ndsv[post]<M[post]:
+
+                            rate=k[post]*(M[post]-ndsv[post])
+                            wait=np.random.exponential(1/rate)
+                            next_refill[post]=t+int(np.round(wait/dt))
+
+                vth[post,t]+=(alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2)
+
+                V[post,t]=vr[post]
+
+    if run==navgs-1:
+        V_last=V.copy()
+        Vth_last=vth.copy()
+
+    for i in range(N):
+
+        spike_times=time[spikes[i]==1]
+
+        if len(spike_times)>1:
+
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+
+        else:
+            rate_acc[run,i]=np.nan
+
+mean_rate=np.nanmean(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+fs=15
+
+fig,ax=plt.subplots(6,2,figsize=(16,12),sharex=True)
+
+for i in range(6):
+
+    rate_text=f", rate = {mean_rate[i]:.2f} Hz, STD={np.std(rate_acc[:,i]):.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A"
+
+    # membrane potential
+    ax[i,0].plot(time,V_last[i],label="V")
+    ax[i,0].plot(time,Vth_last[i],label="Vth")
+
+    mask=~np.isnan(spike_peak_last[i])
+
+    ax[i,0].scatter(
+        time[mask],
+        spike_peak_last[i,mask],
+        s=60,
+        color="black",
+        zorder=5,
+        label="Spike"
+    )
+
+    ax[i,0].set_ylabel(names[i],fontsize=fs)
+    ax[i,0].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i,0].legend(fontsize=fs-2,loc="upper right")
+    ax[i,0].tick_params(axis="both",labelsize=fs)
+
+    # docked synaptic vesicles
+    ax[i,1].plot(time,ndsv_last[i],label="Docked SVs")
+    ax[i,1].set_ylabel("n(t)",fontsize=fs)
+    ax[i,1].set_title(names[i]+" Docked SVs",fontsize=fs)
+    ax[i,1].set_ylim(0,M[i]+0.5)
+    ax[i,1].legend(fontsize=fs-2,loc="upper right")
+    ax[i,1].tick_params(axis="both",labelsize=fs)
+
+ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
+ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+
+#%% 6 - plot an individual trace
+
+plt.plot(np.linspace(0,T,len(V_last[0])),1000*V_last[0],label='membrane potential')
+plt.plot(np.linspace(0,T,len(Vth_last[0])), 1000*Vth_last[0],label='threshold potential')
+# plt.legend(fontsize=fs)
+plt.xlabel('Time (sec)',fontsize=fs)
+plt.ylabel('Voltage (mV)',fontsize=fs)
+plt.tick_params(axis='both', labelsize=fs)
+
+#%% 6 - plotting all the results in a timeline plot above it
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Patch
+
+# Updated with the exact firing rate mean and STD values from your uploaded chart panels
+data = {
+    'C': {
+        'PYR1': (2.57, 0.34), 'PYR2': (2.63, 0.46),
+        'FB1': (7.09, 0.60),  'FB2': (7.17, 0.73),
+        'FF1': (8.82, 0.83),  'FF2': (8.92, 1.3)
+    },
+    'KPYR': {
+        'PYR1': (2.67, 0.32), 'PYR2': (2.59, 0.26),
+        'FB1': (7.05, 0.73),  'FB2': (6.76, 0.57),
+        'FF1': (9.04, 0.92),  'FF2': (8.74, 0.68)
+    },
+    'KFB': {
+        'PYR1': (5.57, 0.54), 'PYR2': (5.61, 0.48),
+        'FB1': (7.07, 0.51),  'FB2': (7.02, 0.59),
+        'FF1': (8.74, 0.83),  'FF2': (9, 0.94)
+    },
+    'KFF': {
+        'PYR1': (5.83, 0.44), 'PYR2': (5.93, 0.35),
+        'FB1': (7.37, 0.52),  'FB2': (7.19, 0.45),
+        'FF1': (8.82, 0.98),  'FF2': (9.11, 1.16)
+    }
+}
+
+# Define color scheme by Neuron Type
+colors = {
+    'PYR1': 'maroon',
+    'PYR2': 'magenta',
+    'FB1': 'dodgerblue',
+    'FB2': 'blueviolet',
+    'FF1': 'limegreen',
+    'FF2': 'forestgreen'
+}
+
+neurons = ['PYR1', 'PYR2', 'FB1', 'FB2', 'FF1', 'FF2']
+conditions = ['C', 'KPYR', 'KFB', 'KFF']
+
+# Create plot
+fig, ax = plt.subplots(figsize=(11, 8.5))
+
+plot_data = []
+# Group by condition first, then by neuron type
+for cond in conditions:
+    for neur in neurons:
+        mean, std = data[cond][neur]
+        plot_data.append((mean, std, cond, neur))
+
+# Reverse list for correct top-down plotting order (C starts at the top y-index)
+plot_data.reverse()
+
+# Dictionary to track positions for condition-based section labeling on the Y axis
+condition_positions = {}
+
+for idx, (mean, std, cond, neur) in enumerate(plot_data):
+    # Plot using the neuron-specific color
+    ax.errorbar(mean, idx, xerr=std, fmt='o', color=colors[neur], capsize=4, elinewidth=1.5, markersize=6)
+    
+    # 1. Plot the neuron name to the left of its error whisker
+    text_x = mean - std - 0.12
+    ax.text(text_x, idx, neur, va='center', ha='right', fontsize=9.5, fontweight='bold', family='monospace', color=colors[neur])
+    
+    # 2. Plot the exact numerical values in slightly larger numbers above the mean point plot
+    num_text = f"{mean}±{std}"
+    ax.text(mean, idx + 0.20, num_text, va='bottom', ha='center', fontsize=9.0, family='monospace', color='dimgray')
+    
+    # Group row positions by condition to position center titles later
+    if cond not in condition_positions:
+        condition_positions[cond] = []
+    condition_positions[cond].append(idx)
+
+# Map conditions to clear display titles along the Y axis
+y_ticks = []
+y_labels = []
+condition_display_names = {'C': 'Calibration', 'KPYR': 'PYR Knockout', 'KFB': 'FB Knockout', 'KFF': 'FF Knockout'}
+
+for cond, positions in condition_positions.items():
+    # Target the middle vertical index of the block of 6 rows to place the text label
+    mid_point = np.mean(positions)
+    y_ticks.append(mid_point)
+    y_labels.append(condition_display_names[cond])
+
+# Set up clean Sectioned Y-axis with requested large fonts
+ax.set_yticks(y_ticks)
+ax.set_yticklabels(y_labels, fontsize=15, fontweight='bold')
+ax.set_xlabel('Firing Rate (Hz)', fontsize=15, fontweight='bold')
+ax.set_title('Neuron Firing Rates (Mean ± 1 STD) Stacked by Condition', fontsize=14, fontweight='bold', pad=20)
+
+# Clear boundary separator lines every 6 rows to outline condition blocks explicitly
+for i in range(6, len(plot_data), 6):
+    ax.axhline(i - 0.5, color='black', linestyle='-', alpha=0.15)
+
+ax.grid(axis='x', linestyle='--', alpha=0.5)
+ax.set_xlim(0, 11)
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.tick_params(axis='both', labelsize=15)
+
+# Custom legend for neuron types
+legend_elements = [Patch(facecolor=colors[n], label=n) for n in neurons]
+ax.legend(handles=legend_elements, loc='upper right', title='Neuron Types', frameon=True, facecolor='white', edgecolor='none')
+
+plt.tight_layout()
+plt.show()
+
+#%% 6 - PSTH
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+W=np.zeros((N,N))
+
+spyr=4.75e-12
+spyrfb=17.46e-12
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+sfb=-203.8e-12
+
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+sff=-203.8e-12
+sffpyr=-203.8e-12
+
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+MPYR1=10
+MFB1=10
+MFF1=10
+MPYR2=MPYR1
+MFB2=MFB1
+MFF2=MFF1
+M=[MPYR1,MPYR2,MFB1,MFB2,MFF1,MFF2]
+
+prPYR1=0.2
+prPYR2=0.2
+prFB1=0.2
+prFB2=0.2
+prFF1=0.2
+prFF2=0.2
+pr=[prPYR1,prPYR2,prFB1,prFB2,prFF1,prFF2]
+
+kPYR1=1.0
+kFB1=1.0
+kFF1=1.0
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
+
+T=10
+navgs=10
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+ttype=9
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+noise=np.array([0.28e-9,2.63e-9,3.93e-9])
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[1])
+    return np.random.normal(0,noise[2])
+
+rate_acc=np.zeros((navgs,N))
+
+V_last=None
+I_last=None
+spike_peak_last=None
+Vth_last=None
+ndsv_last=None
+
+# Store spikes from every trial for PSTH
+spikes_all=np.zeros((navgs,N,len(time)))
+
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+
+    Ispike=np.zeros((N,N))
+
+    ndsv=np.array(M,dtype=int)
+    next_refill=np.full(N,np.inf)
+
+    if run==navgs-1:
+        spike_peak_last=np.full((N,len(time)),np.nan)
+        I_last=np.zeros((N,len(time)))
+        ndsv_last=np.zeros((N,len(time)))
+        ndsv_last[:,0]=ndsv
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    for t in range(1,len(time)):
+
+        for post in range(N):
+            if t>=next_refill[post] and ndsv[post]<M[post]:
+                ndsv[post]+=1
+
+                if ndsv[post]<M[post]:
+                    rate=k[post]*(M[post]-ndsv[post])
+                    wait=np.random.exponential(1/rate)
+                    next_refill[post]=t+int(np.round(wait/dt))
+                else:
+                    next_refill[post]=np.inf
+
+        if run==navgs-1:
+            ndsv_last[:,t]=ndsv
+
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        if run==navgs-1:
+            for post in range(N):
+                I_last[post,t]=np.sum(Ispike[:,post])
+
+        for post in range(N):
+
+            Inoise=getnoise(noise,post)
+
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            if V[post,t]>vth[post,t]:
+
+                spikes[post,t]=1
+
+                if run==navgs-1:
+                    spike_peak_last[post,t]=V[post,t]
+
+                rfon[post]=True
+                rftimer[post]=rf
+
+                for target in range(N):
+
+                    if W[post,target]!=0:
+
+                        B=np.random.binomial(ndsv[post],pr[post])
+
+                        ndsv[post]-=B
+
+                        Ispike[post,target]+=W[post,target]*B
+
+                        if B>0 and ndsv[post]<M[post]:
+
+                            rate=k[post]*(M[post]-ndsv[post])
+                            wait=np.random.exponential(1/rate)
+                            next_refill[post]=t+int(np.round(wait/dt))
+
+                vth[post,t]+=(alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2)
+
+                V[post,t]=vr[post]
+
+    if run==navgs-1:
+        V_last=V.copy()
+        Vth_last=vth.copy()
+
+    # Store this trial's spike trains
+    spikes_all[run]=spikes
+
+    for i in range(N):
+
+        spike_times=time[spikes[i]==1]
+
+        if len(spike_times)>1:
+
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+
+        else:
+            rate_acc[run,i]=np.nan
+
+mean_rate=np.nanmean(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+fs=15
+
+fig,ax=plt.subplots(6,2,figsize=(16,12),sharex=True)
+
+for i in range(6):
+
+    rate_text=f", rate = {mean_rate[i]:.2f} Hz, STD={np.std(rate_acc[:,i]):.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A"
+
+    ax[i,0].plot(time,V_last[i],label="V")
+    ax[i,0].plot(time,Vth_last[i],label="Vth")
+
+    mask=~np.isnan(spike_peak_last[i])
+
+    ax[i,0].scatter(time[mask],spike_peak_last[i,mask],s=60,color="black",zorder=5,label="Spike")
+
+    ax[i,0].set_ylabel(names[i],fontsize=fs)
+    ax[i,0].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i,0].legend(fontsize=fs-2,loc="upper right")
+    ax[i,0].tick_params(axis="both",labelsize=fs)
+
+    ax[i,1].plot(time,ndsv_last[i],label="Docked SVs")
+    ax[i,1].set_ylabel("nDSV",fontsize=fs)
+    ax[i,1].set_title(names[i]+" Docked SVs",fontsize=fs)
+    ax[i,1].set_ylim(0,M[i]+0.5)
+    ax[i,1].legend(fontsize=fs-2,loc="upper right")
+    ax[i,1].tick_params(axis="both",labelsize=fs)
+
+ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
+ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% Conventional trial-averaged PSTHs
+
+bin_width=0.05
+bins=np.arange(0,T+bin_width,bin_width)
+bin_centers=(bins[:-1]+bins[1:])/2
+
+psth_trials=np.zeros((navgs,3,len(bin_centers)))
+
+populations=[PYR,FB,FF]
+population_names=["PYR","FB","FF"]
+
+for run in range(navgs):
+    for p,pop in enumerate(populations):
+        population_spikes=np.sum(spikes_all[run,pop],axis=0)
+        spike_times=time[population_spikes>0]
+        counts,_=np.histogram(spike_times,bins=bins)
+        psth_trials[run,p]=counts/bin_width/len(pop)
+
+psth_mean=np.mean(psth_trials,axis=0)
+psth_std=np.std(psth_trials,axis=0)
+
+fig,ax=plt.subplots(3,1,figsize=(12,9),sharex=True)
+
+for p in range(3):
+    ax[p].plot(bin_centers,psth_mean[p],linewidth=2,label=population_names[p],
+               marker='o')
+    ax[p].fill_between(bin_centers,psth_mean[p]-psth_std[p],psth_mean[p]+psth_std[p],alpha=0.2)
+    ax[p].set_ylabel("Firing rate (Hz)",fontsize=fs)
+    ax[p].set_title(population_names[p]+" Trial-Averaged PSTH",fontsize=fs)
+    ax[p].tick_params(axis="both",labelsize=fs)
+    ax[p].legend(fontsize=fs-2)
+
+ax[-1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+#%% 6 - plot "navg" simulations - SVs
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+W=np.zeros((N,N))
+spyr=4.75e-12
+spyrfb=17.46e-12
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+sfb=-203.8e-12
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+sff=-203.8e-12
+sffpyr=-203.8e-12
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+MPYR1=10
+MFB1=10
+MFF1=10
+MPYR2=MPYR1
+MFB2=MFB1
+MFF2=MFF1
+M=[MPYR1,MPYR2,MFB1,MFB2,MFF1,MFF2]
+
+prPYR1=0.2
+prPYR2=0.2
+prFB1=0.2
+prFB2=0.2
+prFF1=0.2
+prFF2=0.2
+pr=[prPYR1,prPYR2,prFB1,prFB2,prFF1,prFF2]
+
+kPYR1=1.0
+kFB1=1.0
+kFF1=1.0
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
+
+T=0.07
+navgs=5
+ttype=2
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+if ttype == 0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype == 1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype == 2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+noise=np.array([0.28e-9,2.63e-9,3.93e-9])
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[1])
+    return np.random.normal(0,noise[2])
+
+rate_acc=np.zeros((navgs,N))
+V_all=np.zeros((navgs,N,len(time)))
+vth_all=np.zeros((navgs,N,len(time)))
+spikes_all=np.zeros((navgs,N,len(time)))
+spike_peak=np.full((navgs,N,len(time)),np.nan)
+
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+    Ispike=np.zeros((N,N))
+    ndsv=np.array(M,dtype=int)
+    next_refill=np.full(N,np.inf)
+    V[:,0]=V0
+    vth[:,0]=vt
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    for t in range(1,len(time)):
+        for post in range(N):
+            if t >= next_refill[post] and ndsv[post] < M[post]:
+                ndsv[post]+=1
+                if ndsv[post] < M[post]:
+                    rate=k[post]*(M[post]-ndsv[post])
+                    wait=np.random.exponential(1/rate)
+                    next_refill[post]=t+int(np.round(wait/dt))
+                else:
+                    next_refill[post]=np.inf
+
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        for post in range(N):
+            Inoise=getnoise(noise,post)
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            if V[post,t]>vth[post,t]:
+                spikes[post,t]=1
+                spike_peak[run,post,t]=V[post,t]
+                rfon[post]=True
+                rftimer[post]=rf
+
+                for target in range(N):
+                    if W[post,target]!=0:
+                        B=np.random.binomial(ndsv[post],pr[post])
+                        ndsv[post]-=B
+                        Ispike[post,target]+=W[post,target]*B
+
+                        if B>0 and ndsv[post]<M[post]:
+                            rate=k[post]*(M[post]-ndsv[post])
+                            wait=np.random.exponential(1/rate)
+                            next_refill[post]=t+int(np.round(wait/dt))
+
+                vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2
+                V[post,t]=vr[post]
+
+    V_all[run]=V
+    vth_all[run]=vth
+    spikes_all[run]=spikes
+
+    for i in range(N):
+        spike_times=time[spikes[i]==1]
+        if len(spike_times)>1:
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+        else:
+            rate_acc[run,i]=np.nan
+
+mean_rate=np.nanmean(rate_acc,axis=0)
+std_rate=np.nanstd(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+fs=15
+
+fig,ax=plt.subplots(6,1,figsize=(12,12),sharex=True)
+
+colors=plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+for i in range(N):
+    rate_text=f", rate = {mean_rate[i]:.2f} Hz, STD={std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A"
+
+    for run in range(navgs):
+        c=colors[run % len(colors)]
+
+        ax[i].plot(time,V_all[run,i]*1000,color=c)
+
+        mask=~np.isnan(spike_peak[run,i])
+
+        ax[i].scatter(time[mask],spike_peak[run,i,mask]*1000,s=30,facecolors="black",edgecolors=c,linewidths=1.5,zorder=5)
+
+    ax[i].set_ylabel(names[i],fontsize=fs)
+
+# =============================================================================
+#     ax[i].set_title(
+#         names[i]+rate_text,
+#         fontsize=fs
+#     )
+# =============================================================================
+
+    ax[i].tick_params(axis="both",labelsize=fs)
+
+ax[-1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+
+
+#%% 6 - plot "navg" averages of the simulations
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+W=np.zeros((N,N))
+spyr=4.75e-12
+spyrfb=17.46e-12
+
+W[PYR1,PYR2]=spyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+sfb=-203.8e-12
+W[FB1,PYR1]=sfb
+W[FB1,PYR2]=sfb
+W[FB1,FB2]=sfb
+W[FB2,PYR1]=sfb
+W[FB2,PYR2]=sfb
+W[FB2,FB1]=sfb
+
+sff=-203.8e-12
+sffpyr=-203.8e-12
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sff
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sff
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+# DOCKED SYNAPTIC VESICLE PARAMETERS
+MPYR1=10
+MFB1=10
+MFF1=10
+MPYR2=MPYR1
+MFB2=MFB1
+MFF2=MFF1
+M=[MPYR1,MPYR2,MFB1,MFB2,MFF1,MFF2]
+
+prPYR1=0.2
+prPYR2=0.2
+prFB1=0.2
+prFB2=0.2
+prFF1=0.2
+prFF2=0.2
+pr=[prPYR1,prPYR2,prFB1,prFB2,prFF1,prFF2]
+
+kPYR1=1.0
+kFB1=1.0
+kFF1=1.0
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
+
+T=40
+navgs=1
+ttype=9
+dt=1e-4
+time=np.arange(0,T,dt)
+rf=1e-3
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+noise=np.array([0.28e-9,2.63e-9,3.93e-9])
+
+def getnoise(noise,i):
+    if i in [PYR1,PYR2]:
+        return np.random.normal(0,noise[0])
+    if i in [FB1,FB2]:
+        return np.random.normal(0,noise[2])
+    return np.random.normal(0,noise[1])
+
+# STORAGE FOR ALL NAVGS RUNS
+rate_acc=np.zeros((navgs,N))
+V_all=np.zeros((navgs,N,len(time)))
+vth_all=np.zeros((navgs,N,len(time)))
+spikes_all=np.zeros((navgs,N,len(time)))
+spike_peak=np.full((navgs,N,len(time)),np.nan)
+
+# SIMULATION
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+    Ispike=np.zeros((N,N))
+    ndsv=np.array(M,dtype=int)
+    next_refill=np.full(N,np.inf)
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    for t in range(1,len(time)):
+        # REPLENISH DOCKED SYNAPTIC VESICLES
+        for post in range(N):
+            if t>=next_refill[post] and ndsv[post]<M[post]:
+                ndsv[post]+=1
+                if ndsv[post]<M[post]:
+                    rate=k[post]*(M[post]-ndsv[post])
+                    wait=np.random.exponential(1/rate)
+                    next_refill[post]=t+int(np.round(wait/dt))
+                else:
+                    next_refill[post]=np.inf
+
+        # DECAY SYNAPTIC CURRENTS
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        for post in range(N):
+            Inoise=getnoise(noise,post)
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            if V[post,t]>vth[post,t]:
+                spikes[post,t]=1
+                spike_peak[run,post,t]=V[post,t]
+                rfon[post]=True
+                rftimer[post]=rf
+
+                # RELEASE VESICLES
+                for target in range(N):
+                    if W[post,target]!=0:
+                        B=np.random.binomial(ndsv[post],pr[post])
+                        ndsv[post]-=B
+                        Ispike[post,target]+=W[post,target]*B
+
+                        if B>0 and ndsv[post]<M[post]:
+                            rate=k[post]*(M[post]-ndsv[post])
+                            wait=np.random.exponential(1/rate)
+                            next_refill[post]=t+int(np.round(wait/dt))
+
+                # ADAPTIVE THRESHOLD
+                vth[post,t]+=(alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2)
+                V[post,t]=vr[post]
+
+    V_all[run]=V
+    vth_all[run]=vth
+    spikes_all[run]=spikes
+
+    # FIRING RATE CALCULATION
+    for i in range(N):
+        spike_times=time[spikes[i]==1]
+        if len(spike_times)>1:
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+        else:
+            rate_acc[run,i]=np.nan
+
+# RESULTS
+mean_rate=np.nanmean(rate_acc,axis=0)
+std_rate=np.nanstd(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+# PLOT ALL NAVGS RUNS
+fs=15
+
+fig,ax=plt.subplots(6,1,figsize=(12,12),sharex=True)
+
+colors=plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+for i in range(N):
+    rate_text=(f", rate = {mean_rate[i]:.2f} Hz, STD={std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else ", rate = N/A")
+
+    for run in range(navgs):
+        c=colors[run % len(colors)]
+        ax[i].plot(time,V_all[run,i]*1000,color=c)
+        mask=~np.isnan(spike_peak[run,i])
+        ax[i].scatter(time[mask],spike_peak[run,i,mask]*1000,s=30,facecolors="black",edgecolors=c,linewidths=1.5,zorder=5)
+
+    ax[i].set_ylabel(names[i],fontsize=fs)
+    ax[i].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i].tick_params(axis="both",labelsize=fs)
+
+ax[-1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
