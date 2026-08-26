@@ -5068,7 +5068,7 @@ plt.tight_layout()
 plt.show()
 
 #%% 6 - Connection-specific SV pools with mini and AP release
-# Gaussian noise only in FF neurons
+# Gaussian noise only in FF neurons (modified)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5122,42 +5122,69 @@ for i in FF:
 # W[pre,post] is the synaptic weight from pre to post
 # ============================================================
 
+#pyr2.6,fb7,ff9
+
+spyrpyr=12e-12
+spyrfb=85e-12
+
+sfbpyr=-10e-12
+sfbfb=sfbpyr
+
+sffff=-200e-12
+sffpyr=-10e-12
+
+rminiPYR=15
+rminiFB=15
+rminiFF=20
+
+prminiPYR=0.03
+prAPPYR=0.1
+
+prminiFB=0.01
+prAPFB=0.20
+
+prminiFF=0.05
+prAPFF=0.20
+
+MPYR=100
+MFB=100
+MFF=100
+
+kPYR1=1.0
+kFB1=1.0
+kFF1=1.0
+
+noise=np.array([0.0,0.0,6.35e-9])
+
+T=40
+navgs=10
+dt=1e-4
+rf=1e-3
+ttype=9 #0-pyrpyr,1-fbpyr,2-ffpyr
+
 W=np.zeros((N,N))
 
-spyr=4.75e-12
-spyrfb=17.46e-12
-
-W[PYR1,PYR2]=spyr
+W[PYR1,PYR2]=spyrpyr
 W[PYR1,FB1]=spyrfb
 W[PYR1,FB2]=spyrfb
-
-W[PYR2,PYR1]=spyr
+W[PYR2,PYR1]=spyrpyr
 W[PYR2,FB1]=spyrfb
 W[PYR2,FB2]=spyrfb
 
-sfb=-203.8e-12
 
 W[FB1,PYR1]=sfb
 W[FB1,PYR2]=sfb
-W[FB1,FB2]=sfb
-
+W[FB1,FB2]=sfbfb
 W[FB2,PYR1]=sfb
 W[FB2,PYR2]=sfb
-W[FB2,FB1]=sfb
-
-sff=-203.8e-12
-sffpyr=-203.8e-12
+W[FB2,FB1]=sfbfb
 
 W[FF1,PYR1]=sffpyr
 W[FF1,PYR2]=sffpyr
-W[FF1,FF2]=sff
-
+W[FF1,FF2]=sffff
 W[FF2,PYR1]=sffpyr
 W[FF2,PYR2]=sffpyr
-W[FF2,FF1]=sff
-
-taui_exc=20e-3
-taui_inh=10e-3
+W[FF2,FF1]=sffff
 
 # ============================================================
 # CONNECTION-SPECIFIC DOCKED SV POOLS
@@ -5168,29 +5195,26 @@ taui_inh=10e-3
 
 M=np.zeros((N,N),dtype=int)
 
-M[PYR1,PYR2]=10
-M[PYR1,FB1]=10
-M[PYR1,FB2]=10
+M[PYR1,PYR2]=MPYR
+M[PYR1,FB1]=MPYR
+M[PYR1,FB2]=MPYR
+M[PYR2,PYR1]=MPYR
+M[PYR2,FB1]=MPYR
+M[PYR2,FB2]=MPYR
 
-M[PYR2,PYR1]=10
-M[PYR2,FB1]=10
-M[PYR2,FB2]=10
+M[FB1,PYR1]=MFB
+M[FB1,PYR2]=MFB
+M[FB1,FB2]=MFB
+M[FB2,PYR1]=MFB
+M[FB2,PYR2]=MFB
+M[FB2,FB1]=MFB
 
-M[FB1,PYR1]=10
-M[FB1,PYR2]=10
-M[FB1,FB2]=10
-
-M[FB2,PYR1]=10
-M[FB2,PYR2]=10
-M[FB2,FB1]=10
-
-M[FF1,PYR1]=10
-M[FF1,PYR2]=10
-M[FF1,FF2]=10
-
-M[FF2,PYR1]=10
-M[FF2,PYR2]=10
-M[FF2,FF1]=10
+M[FF1,PYR1]=MFF
+M[FF1,PYR2]=MFF
+M[FF1,FF2]=MFF
+M[FF2,PYR1]=MFF
+M[FF2,PYR2]=MFF
+M[FF2,FF1]=MFF
 
 # ============================================================
 # TWO RELEASE PROBABILITIES
@@ -5205,12 +5229,24 @@ M[FF2,FF1]=10
 prmini=np.zeros((N,N))
 prAP=np.zeros((N,N))
 
-for pre in range(N):
+for pre in PYR:
     for post in range(N):
         if W[pre,post]!=0:
-            prmini[pre,post]=0.05
-            prAP[pre,post]=0.20
+            prmini[pre,post]=prminiPYR
+            prAP[pre,post]=prAPPYR
 
+for pre in FB:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prmini[pre,post]=prminiFB
+            prAP[pre,post]=prAPFB
+
+for pre in FF:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prmini[pre,post]=prminiFF
+            prAP[pre,post]=prAPFF
+            
 # ============================================================
 # SPONTANEOUS MINI EVENT RATES
 #
@@ -5221,13 +5257,13 @@ for pre in range(N):
 mini_rate=np.zeros(N)
 
 for i in PYR:
-    mini_rate[i]=5.0
+    mini_rate[i]=rminiPYR
 
 for i in FB:
-    mini_rate[i]=10.0
+    mini_rate[i]=rminiFB
 
 for i in FF:
-    mini_rate[i]=15.0
+    mini_rate[i]=rminiFF
 
 # ============================================================
 # REPLENISHMENT RATE COEFFICIENT
@@ -5236,23 +5272,12 @@ for i in FF:
 # Each connection-specific pool independently refills.
 # ============================================================
 
-kPYR1=1.0
-kFB1=1.0
-kFF1=1.0
-
 kPYR2=kPYR1
 kFB2=kFB1
 kFF2=kFF1
-
 k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
 
-T=40
-navgs=10
-dt=1e-4
 time=np.arange(0,T,dt)
-rf=1e-3
-
-ttype=9
 
 if ttype==0:
     W[PYR2,PYR1],W[PYR1,PYR2]=0,0
@@ -5270,20 +5295,11 @@ if ttype==2:
 # PYR and FB neurons receive no Gaussian noise.
 # ============================================================
 
-noise=np.array([
-    0.0,
-    0.0,
-    3.93e-9
-])
-
 def getnoise(noise,i):
-
     if i in PYR:
         return 0.0
-
     if i in FB:
         return 0.0
-
     return np.random.normal(0,noise[2])
 
 # ============================================================
@@ -5301,7 +5317,8 @@ ndsv_last=None
 # ============================================================
 # SIMULATION
 # ============================================================
-
+taui_exc=20e-3#fixed
+taui_inh=10e-3#fixed
 for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
     V=np.zeros((N,len(time)))
@@ -5322,34 +5339,18 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
     next_mini=np.zeros(N)
 
     for pre in range(N):
-
         if mini_rate[pre]>0:
-
-            wait=np.random.exponential(
-                1/mini_rate[pre]
-            )
-
+            wait=np.random.exponential(1/mini_rate[pre])
             next_mini[pre]=wait
-
         else:
             next_mini[pre]=np.inf
 
     if run==navgs-1:
-
-        spike_peak_last=np.full(
-            (N,len(time)),
-            np.nan
-        )
-
-        I_last=np.zeros(
-            (N,len(time))
-        )
+        spike_peak_last=np.full((N,len(time)),np.nan)
+        I_last=np.zeros((N,len(time)))
 
         # Store every connection-specific SV pool.
-        ndsv_last=np.zeros(
-            (N,N,len(time))
-        )
-
+        ndsv_last=np.zeros((N,N,len(time)))
         ndsv_last[:,:,0]=ndsv
 
     V[:,0]=V0
@@ -5371,37 +5372,18 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         # ====================================================
 
         for pre in range(N):
-
             for post in range(N):
-
                 if W[pre,post]==0:
                     continue
 
-                if (
-                    current_time>=next_refill[pre,post]
-                    and ndsv[pre,post]<M[pre,post]
-                ):
-
+                if current_time>=next_refill[pre,post] and ndsv[pre,post]<M[pre,post]:
                     ndsv[pre,post]+=1
 
                     if ndsv[pre,post]<M[pre,post]:
-
-                        rate=(
-                            k[pre]
-                            *(
-                                M[pre,post]
-                                -ndsv[pre,post]
-                            )
-                        )
-
+                        rate=k[pre]*(M[pre,post]-ndsv[pre,post])
                         wait=np.random.exponential(1/rate)
-
-                        next_refill[pre,post]=(
-                            current_time+wait
-                        )
-
+                        next_refill[pre,post]=current_time+wait
                     else:
-
                         next_refill[pre,post]=np.inf
 
         # ====================================================
@@ -5415,60 +5397,26 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         # ====================================================
 
         for pre in range(N):
-
             if current_time>=next_mini[pre]:
-
                 for post in range(N):
-
                     if W[pre,post]==0:
                         continue
 
-                    B=np.random.binomial(
-                        ndsv[pre,post],
-                        prmini[pre,post]
-                    )
-
+                    B=np.random.binomial(ndsv[pre,post],prmini[pre,post])
                     ndsv[pre,post]-=B
+                    Ispike[pre,post]+=W[pre,post]*B
 
-                    Ispike[pre,post]+=(
-                        W[pre,post]*B
-                    )
-
-                    if (
-                        B>0
-                        and ndsv[pre,post]<M[pre,post]
-                    ):
-
-                        rate=(
-                            k[pre]
-                            *(
-                                M[pre,post]
-                                -ndsv[pre,post]
-                            )
-                        )
-
-                        wait=np.random.exponential(
-                            1/rate
-                        )
-
-                        next_refill[pre,post]=(
-                            current_time+wait
-                        )
+                    if B>0 and ndsv[pre,post]<M[pre,post]:
+                        rate=k[pre]*(M[pre,post]-ndsv[pre,post])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[pre,post]=current_time+wait
 
                 # Schedule this presynaptic neuron's
                 # next spontaneous mini event.
                 if mini_rate[pre]>0:
-
-                    wait=np.random.exponential(
-                        1/mini_rate[pre]
-                    )
-
-                    next_mini[pre]=(
-                        current_time+wait
-                    )
-
+                    wait=np.random.exponential(1/mini_rate[pre])
+                    next_mini[pre]=current_time+wait
                 else:
-
                     next_mini[pre]=np.inf
 
         # ====================================================
@@ -5476,33 +5424,17 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         # ====================================================
 
         for pre in range(N):
-
-            taui=(
-                taui_exc
-                if pre in PYR
-                else taui_inh
-            )
-
+            taui=taui_exc if pre in PYR else taui_inh
             for post in range(N):
-
-                Ispike[pre,post]+=(
-                    dt
-                    *(
-                        -Ispike[pre,post]/taui
-                    )
-                )
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
 
         # ====================================================
         # STORE TOTAL INCOMING CURRENT
         # ====================================================
 
         if run==navgs-1:
-
             for post in range(N):
-
-                I_last[post,t]=np.sum(
-                    Ispike[:,post]
-                )
+                I_last[post,t]=np.sum(Ispike[:,post])
 
         # ====================================================
         # UPDATE NEURONS
@@ -5510,50 +5442,19 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
         for post in range(N):
 
-            Inoise=getnoise(
-                noise,
-                post
-            )
-
-            Isyn=np.sum(
-                Ispike[:,post]
-            )
-
+            Inoise=getnoise(noise,post)
+            Isyn=np.sum(Ispike[:,post])
             I=Isyn+Inoise
-
-            i_ion=(
-                gL[post]
-                *(
-                    V[post,t-1]
-                    -V0[post]
-                )
-            )
-
-            dVdt=(
-                I-i_ion
-            )/C_m[post]
-
-            V[post,t]=(
-                V[post,t-1]
-                +dt*dVdt*(1-rfon[post])
-            )
-
-            dvthdt=(
-                -(vth[post,t-1]-vt[post])
-                /tauvth[post]
-            )
-
-            vth[post,t]=(
-                vth[post,t-1]
-                +dt*dvthdt
-            )
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
 
             if rftimer[post]!=np.inf:
-
                 rftimer[post]-=dt
 
             if rftimer[post]<=0:
-
                 rftimer[post]=np.inf
                 rfon[post]=False
 
@@ -5562,14 +5463,10 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
             # =================================================
 
             if V[post,t]>vth[post,t]:
-
                 spikes[post,t]=1
 
                 if run==navgs-1:
-
-                    spike_peak_last[
-                        post,t
-                    ]=V[post,t]
+                    spike_peak_last[post,t]=V[post,t]
 
                 rfon[post]=True
                 rftimer[post]=rf
@@ -5585,58 +5482,23 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                 # =============================================
 
                 for target in range(N):
-
                     if W[post,target]==0:
                         continue
 
-                    B=np.random.binomial(
-                        ndsv[post,target],
-                        prAP[post,target]
-                    )
-
+                    B=np.random.binomial(ndsv[post,target],prAP[post,target])
                     ndsv[post,target]-=B
+                    Ispike[post,target]+=W[post,target]*B
 
-                    Ispike[post,target]+=(
-                        W[post,target]*B
-                    )
-
-                    if (
-                        B>0
-                        and ndsv[post,target]<M[post,target]
-                    ):
-
-                        rate=(
-                            k[post]
-                            *(
-                                M[post,target]
-                                -ndsv[post,target]
-                            )
-                        )
-
-                        wait=np.random.exponential(
-                            1/rate
-                        )
-
-                        next_refill[post,target]=(
-                            current_time+wait
-                        )
+                    if B>0 and ndsv[post,target]<M[post,target]:
+                        rate=k[post]*(M[post,target]-ndsv[post,target])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[post,target]=current_time+wait
 
                 # =============================================
                 # ADAPTIVE THRESHOLD
                 # =============================================
 
-                vth[post,t]+=(
-                    alpha[post,0]
-                    +alpha[post,1]
-                    *(
-                        V[post,t]/vt[post]
-                    )
-                    +alpha[post,2]
-                    *(
-                        V[post,t]/vt[post]
-                    )**2
-                )
-
+                vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2
                 V[post,t]=vr[post]
 
         # ====================================================
@@ -5644,7 +5506,6 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         # ====================================================
 
         if run==navgs-1:
-
             ndsv_last[:,:,t]=ndsv
 
     # ========================================================
@@ -5652,7 +5513,6 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
     # ========================================================
 
     if run==navgs-1:
-
         V_last=V.copy()
         Vth_last=vth.copy()
 
@@ -5661,31 +5521,19 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
     # ========================================================
 
     for i in range(N):
-
-        spike_times=time[
-            spikes[i]==1
-        ]
+        spike_times=time[spikes[i]==1]
 
         if len(spike_times)>1:
-
             isi=np.diff(spike_times)
-
-            rate_acc[run,i]=(
-                1/np.mean(isi)
-            )
-
+            rate_acc[run,i]=1/np.mean(isi)
         else:
-
             rate_acc[run,i]=np.nan
 
 # ============================================================
 # MEAN FIRING RATES
 # ============================================================
 
-mean_rate=np.nanmean(
-    rate_acc,
-    axis=0
-)
+mean_rate=np.nanmean(rate_acc,axis=0)
 
 print("Mean firing rates (Hz):")
 print(mean_rate)
@@ -5696,121 +5544,45 @@ print(mean_rate)
 
 fs=15
 
-fig,ax=plt.subplots(
-    6,
-    2,
-    figsize=(16,12),
-    sharex=True
-)
+fig,ax=plt.subplots(6,2,figsize=(16,12),sharex=True)
 
 for i in range(6):
 
-    rate_text=(
-        f", rate = {mean_rate[i]:.2f} Hz, "
-        f"STD={np.nanstd(rate_acc[:,i]):.2f} Hz"
-        if not np.isnan(mean_rate[i])
-        else ", rate = N/A"
-    )
+    rate_text=(f", rate = {mean_rate[i]:.2f} Hz, STD={np.nanstd(rate_acc[:,i]):.2f} Hz"
+               if not np.isnan(mean_rate[i]) else ", rate = N/A")
 
     # ========================================================
     # MEMBRANE POTENTIAL
     # ========================================================
 
-    ax[i,0].plot(
-        time,
-        V_last[i],
-        label="V"
-    )
+    ax[i,0].plot(time,V_last[i],label="V")
+    ax[i,0].plot(time,Vth_last[i],label="Vth")
 
-    ax[i,0].plot(
-        time,
-        Vth_last[i],
-        label="Vth"
-    )
+    mask=~np.isnan(spike_peak_last[i])
 
-    mask=~np.isnan(
-        spike_peak_last[i]
-    )
-
-    ax[i,0].scatter(
-        time[mask],
-        spike_peak_last[i,mask],
-        s=60,
-        color="black",
-        zorder=5,
-        label="Spike"
-    )
-
-    ax[i,0].set_ylabel(
-        names[i],
-        fontsize=fs
-    )
-
-    ax[i,0].set_title(
-        names[i]+rate_text,
-        fontsize=fs
-    )
-
-    ax[i,0].legend(
-        fontsize=fs-2,
-        loc="upper right"
-    )
-
-    ax[i,0].tick_params(
-        axis="both",
-        labelsize=fs
-    )
+    ax[i,0].scatter(time[mask],spike_peak_last[i,mask],s=60,color="black",zorder=5,label="Spike")
+    ax[i,0].set_ylabel(names[i],fontsize=fs)
+    ax[i,0].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i,0].legend(fontsize=fs-2,loc="upper right")
+    ax[i,0].tick_params(axis="both",labelsize=fs)
 
     # ========================================================
     # CONNECTION-SPECIFIC DOCKED SV POOLS
     # ========================================================
 
-    connected_targets=np.where(
-        W[i]!=0
-    )[0]
+    connected_targets=np.where(W[i]!=0)[0]
 
     for target in connected_targets:
+        ax[i,1].plot(time,ndsv_last[i,target],label=f"{names[i]} to {names[target]}")
 
-        ax[i,1].plot(
-            time,
-            ndsv_last[i,target],
-            label=f"{names[i]} to {names[target]}"
-        )
+    ax[i,1].set_ylabel("n(t)",fontsize=fs)
+    ax[i,1].set_title(names[i]+" Docked SVs",fontsize=fs)
+    ax[i,1].set_ylim(0,np.max(M[i,:])+0.5)
+    ax[i,1].legend(fontsize=fs-2,loc="upper right")
+    ax[i,1].tick_params(axis="both",labelsize=fs)
 
-    ax[i,1].set_ylabel(
-        "n(t)",
-        fontsize=fs
-    )
-
-    ax[i,1].set_title(
-        names[i]+" Docked SVs",
-        fontsize=fs
-    )
-
-    ax[i,1].set_ylim(
-        0,
-        np.max(M[i,:])+0.5
-    )
-
-    ax[i,1].legend(
-        fontsize=fs-2,
-        loc="upper right"
-    )
-
-    ax[i,1].tick_params(
-        axis="both",
-        labelsize=fs
-    )
-
-ax[-1,0].set_xlabel(
-    "Time (sec)",
-    fontsize=fs
-)
-
-ax[-1,1].set_xlabel(
-    "Time (sec)",
-    fontsize=fs
-)
+ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
+ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
 
 plt.tight_layout()
 plt.show()
