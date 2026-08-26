@@ -4652,420 +4652,6 @@ ax[-1].set_xlabel("Time (sec)",fontsize=fs)
 plt.tight_layout()
 plt.show()
 
-#%% 6 - GOOD - 6x2 plot of the membrane potentials and threshold potentials
-# and the SV pools as a function of time - independent SV pools
-
-import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-
-N=6
-PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
-names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
-
-PYR=[PYR1,PYR2]
-FB=[FB1,FB2]
-FF=[FF1,FF2]
-
-V0=np.zeros(N)
-C_m=np.zeros(N)
-vr=np.zeros(N)
-gL=np.zeros(N)
-vt=np.zeros(N)
-tauvth=np.zeros(N)
-alpha=np.zeros((N,3))
-
-for i in PYR:
-    V0[i]=-78e-3
-    C_m[i]=300e-12
-    vr[i]=-78e-3
-    gL[i]=1/(50e6)
-    vt[i]=-77e-3
-    tauvth[i]=7e-3
-    alpha[i]=[75e-3,0,0]
-
-for i in FB:
-    V0[i]=-78e-3
-    C_m[i]=250e-12
-    vr[i]=-78e-3
-    gL[i]=1/(50e6)
-    vt[i]=-62e-3
-    tauvth[i]=1e-3
-    alpha[i]=[1e-3,1e-3,1e-3]
-
-for i in FF:
-    V0[i]=-78e-3
-    C_m[i]=650e-12
-    vr[i]=-78e-3
-    gL[i]=1/(120e6)
-    vt[i]=-70e-3
-    tauvth[i]=1e-3
-    alpha[i]=[1e-3,1e-3,1e-3]
-
-W=np.zeros((N,N))
-
-spyr=4.75e-12
-spyrfb=17.46e-12
-
-W[PYR1,PYR2]=spyr
-W[PYR1,FB1]=spyrfb
-W[PYR1,FB2]=spyrfb
-W[PYR2,PYR1]=spyr
-W[PYR2,FB1]=spyrfb
-W[PYR2,FB2]=spyrfb
-
-sfb=-203.8e-12
-
-W[FB1,PYR1]=sfb
-W[FB1,PYR2]=sfb
-W[FB1,FB2]=sfb
-W[FB2,PYR1]=sfb
-W[FB2,PYR2]=sfb
-W[FB2,FB1]=sfb
-
-sff=-203.8e-12
-sffpyr=-203.8e-12
-
-W[FF1,PYR1]=sffpyr
-W[FF1,PYR2]=sffpyr
-W[FF1,FF2]=sff
-W[FF2,PYR1]=sffpyr
-W[FF2,PYR2]=sffpyr
-W[FF2,FF1]=sff
-
-taui_exc=20e-3
-taui_inh=10e-3
-
-# ============================================================
-# CONNECTION-SPECIFIC DOCKED SV POOLS
-# M[pre,post] is the number of docked SVs available for
-# the connection from pre to post.
-# ============================================================
-
-M=np.zeros((N,N),dtype=int)
-
-# PYR connections
-M[PYR1,PYR2]=10
-M[PYR1,FB1]=10
-M[PYR1,FB2]=10
-
-M[PYR2,PYR1]=10
-M[PYR2,FB1]=10
-M[PYR2,FB2]=10
-
-# FB connections
-M[FB1,PYR1]=10
-M[FB1,PYR2]=10
-M[FB1,FB2]=10
-
-M[FB2,PYR1]=10
-M[FB2,PYR2]=10
-M[FB2,FB1]=10
-
-# FF connections
-M[FF1,PYR1]=10
-M[FF1,PYR2]=10
-M[FF1,FF2]=10
-
-M[FF2,PYR1]=10
-M[FF2,PYR2]=10
-M[FF2,FF1]=10
-
-prPYR1=0.2
-prPYR2=0.2
-prFB1=0.2
-prFB2=0.2
-prFF1=0.2
-prFF2=0.2
-pr=[prPYR1,prPYR2,prFB1,prFB2,prFF1,prFF2]
-
-# Replenishment rate coefficient remains presynaptic-neuron-specific
-kPYR1=1.0
-kFB1=1.0
-kFF1=1.0
-kPYR2=kPYR1
-kFB2=kFB1
-kFF2=kFF1
-k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
-
-T=40
-navgs=10
-dt=1e-4
-time=np.arange(0,T,dt)
-rf=1e-3
-
-ttype=9
-
-if ttype==0:
-    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
-
-if ttype==1:
-    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
-
-if ttype==2:
-    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
-
-noise=np.array([0.28e-9,2.63e-9,3.93e-9])
-
-def getnoise(noise,i):
-    if i in [PYR1,PYR2]:
-        return np.random.normal(0,noise[0])
-    if i in [FB1,FB2]:
-        return np.random.normal(0,noise[1])
-    return np.random.normal(0,noise[2])
-
-rate_acc=np.zeros((navgs,N))
-
-V_last=None
-I_last=None
-spike_peak_last=None
-Vth_last=None
-ndsv_last=None
-
-for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
-
-    V=np.zeros((N,len(time)))
-    vth=np.zeros((N,len(time)))
-    spikes=np.zeros((N,len(time)))
-
-    Ispike=np.zeros((N,N))
-
-    # Connection-specific docked SV counts
-    ndsv=M.copy()
-
-    # Connection-specific next replenishment times
-    next_refill=np.full((N,N),np.inf)
-
-    if run==navgs-1:
-        spike_peak_last=np.full((N,len(time)),np.nan)
-        I_last=np.zeros((N,len(time)))
-
-        # Store every connection-specific SV pool
-        ndsv_last=np.zeros((N,N,len(time)))
-        ndsv_last[:,:,0]=ndsv
-
-    V[:,0]=V0
-    vth[:,0]=vt
-
-    rfon=np.zeros(N)
-    rftimer=np.ones(N)*np.inf
-
-    for t in range(1,len(time)):
-
-        # ========================================================
-        # Replenish each presynaptic-to-postsynaptic SV pool
-        # independently.
-        # ========================================================
-
-        for pre in range(N):
-            for post in range(N):
-
-                if W[pre,post]==0:
-                    continue
-
-                if t>=next_refill[pre,post] and ndsv[pre,post]<M[pre,post]:
-
-                    ndsv[pre,post]+=1
-
-                    if ndsv[pre,post]<M[pre,post]:
-
-                        rate=k[pre]*(M[pre,post]-ndsv[pre,post])
-
-                        wait=np.random.exponential(1/rate)
-
-                        next_refill[pre,post]=t+int(np.round(wait/dt))
-
-                    else:
-                        next_refill[pre,post]=np.inf
-
-        # Store connection-specific docked SVs
-        if run==navgs-1:
-            ndsv_last[:,:,t]=ndsv
-
-        # ========================================================
-        # Decay each presynaptic-to-postsynaptic current separately
-        # ========================================================
-
-        for pre in range(N):
-
-            taui=taui_exc if pre in PYR else taui_inh
-
-            for post in range(N):
-
-                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
-
-        # Store total incoming current
-        if run==navgs-1:
-
-            for post in range(N):
-                I_last[post,t]=np.sum(Ispike[:,post])
-
-        # ========================================================
-        # Update neurons
-        # ========================================================
-
-        for post in range(N):
-
-            Inoise=getnoise(noise,post)
-
-            Isyn=np.sum(Ispike[:,post])
-
-            I=Isyn+Inoise
-
-            i_ion=gL[post]*(V[post,t-1]-V0[post])
-
-            dVdt=(I-i_ion)/C_m[post]
-
-            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
-
-            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
-
-            vth[post,t]=vth[post,t-1]+dt*dvthdt
-
-            if rftimer[post]!=np.inf:
-                rftimer[post]-=dt
-
-            if rftimer[post]<=0:
-                rftimer[post]=np.inf
-                rfon[post]=False
-
-            if V[post,t]>vth[post,t]:
-
-                spikes[post,t]=1
-
-                if run==navgs-1:
-                    spike_peak_last[post,t]=V[post,t]
-
-                rfon[post]=True
-                rftimer[post]=rf
-
-                # ====================================================
-                # Release independently from each connection-specific
-                # SV pool.
-                # ====================================================
-
-                for target in range(N):
-
-                    if W[post,target]!=0:
-
-                        # Draw release from THIS connection's pool
-                        B=np.random.binomial(
-                            ndsv[post,target],
-                            pr[post]
-                        )
-
-                        # Deplete only THIS connection's pool
-                        ndsv[post,target]-=B
-
-                        # Add released vesicles to this target only
-                        Ispike[post,target]+=W[post,target]*B
-
-                        # Schedule replenishment for this connection
-                        if B>0 and ndsv[post,target]<M[post,target]:
-
-                            rate=k[post]*(
-                                M[post,target]-ndsv[post,target]
-                            )
-
-                            wait=np.random.exponential(1/rate)
-
-                            next_refill[post,target]=(
-                                t+int(np.round(wait/dt))
-                            )
-
-                vth[post,t]+=(
-                    alpha[post,0]
-                    +alpha[post,1]*(V[post,t]/vt[post])
-                    +alpha[post,2]*(V[post,t]/vt[post])**2
-                )
-
-                V[post,t]=vr[post]
-
-    if run==navgs-1:
-        V_last=V.copy()
-        Vth_last=vth.copy()
-
-    for i in range(N):
-
-        spike_times=time[spikes[i]==1]
-
-        if len(spike_times)>1:
-
-            isi=np.diff(spike_times)
-
-            rate_acc[run,i]=1/np.mean(isi)
-
-        else:
-            rate_acc[run,i]=np.nan
-
-mean_rate=np.nanmean(rate_acc,axis=0)
-
-print("Mean firing rates (Hz):")
-print(mean_rate)
-
-fs=15
-
-fig,ax=plt.subplots(6,2,figsize=(16,12),sharex=True)
-
-for i in range(6):
-
-    rate_text=(
-        f", rate = {mean_rate[i]:.2f} Hz, "
-        f"STD={np.std(rate_acc[:,i]):.2f} Hz"
-        if not np.isnan(mean_rate[i])
-        else ", rate = N/A"
-    )
-
-    # membrane potential
-    ax[i,0].plot(time,V_last[i],label="V")
-    ax[i,0].plot(time,Vth_last[i],label="Vth")
-
-    mask=~np.isnan(spike_peak_last[i])
-
-    ax[i,0].scatter(
-        time[mask],
-        spike_peak_last[i,mask],
-        s=60,
-        color="black",
-        zorder=5,
-        label="Spike"
-    )
-
-    ax[i,0].set_ylabel(names[i],fontsize=fs)
-    ax[i,0].set_title(names[i]+rate_text,fontsize=fs)
-    ax[i,0].legend(fontsize=fs-2,loc="upper right")
-    ax[i,0].tick_params(axis="both",labelsize=fs)
-
-    # ============================================================
-    # Connection-specific docked SVs
-    # ============================================================
-
-    connected_targets=np.where(W[i]!=0)[0]
-
-    for target in connected_targets:
-
-        ax[i,1].plot(
-            time,
-            ndsv_last[i,target],
-            label=f"{names[i]} to {names[target]}"
-        )
-
-    ax[i,1].set_ylabel("n(t)",fontsize=fs)
-    ax[i,1].set_title(names[i]+" Docked SVs",fontsize=fs)
-
-    ax[i,1].set_ylim(
-        0,
-        np.max(M[i,:])+0.5
-    )
-
-    ax[i,1].legend(fontsize=fs-2,loc="upper right")
-    ax[i,1].tick_params(axis="both",labelsize=fs)
-
-ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
-ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
-
-plt.tight_layout()
-plt.show()
 
 #%% 6 - Connection-specific SV pools with mini and AP release
 # Gaussian noise only in FF neurons (modified)
@@ -5124,8 +4710,8 @@ for i in FF:
 
 #pyr2.6,fb7,ff9
 
-spyrpyr=12e-12
-spyrfb=85e-12
+spyrpyr=17e-12
+spyrfb=83e-12
 
 sfbpyr=-10e-12
 sfbfb=sfbpyr
@@ -5172,11 +4758,11 @@ W[PYR2,FB1]=spyrfb
 W[PYR2,FB2]=spyrfb
 
 
-W[FB1,PYR1]=sfb
-W[FB1,PYR2]=sfb
+W[FB1,PYR1]=sfbpyr
+W[FB1,PYR2]=sfbfb
 W[FB1,FB2]=sfbfb
-W[FB2,PYR1]=sfb
-W[FB2,PYR2]=sfb
+W[FB2,PYR1]=sfbpyr
+W[FB2,PYR2]=sfbpyr
 W[FB2,FB1]=sfbfb
 
 W[FF1,PYR1]=sffpyr
@@ -5703,6 +5289,536 @@ ax.tick_params(axis='both', labelsize=15)
 # Custom legend for neuron types
 legend_elements = [Patch(facecolor=colors[n], label=n) for n in neurons]
 ax.legend(handles=legend_elements, loc='upper right', title='Neuron Types', frameon=True, facecolor='white', edgecolor='none')
+
+plt.tight_layout()
+plt.show()
+
+#%% 6 - PSTH
+# Connection-specific SV pools with mini and AP release
+# Gaussian noise only in FF neurons
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+vt=np.zeros(N)
+tauvth=np.zeros(N)
+alpha=np.zeros((N,3))
+
+for i in PYR:
+    V0[i]=-78e-3
+    C_m[i]=300e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-77e-3
+    tauvth[i]=7e-3
+    alpha[i]=[75e-3,0,0]
+
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50e6)
+    vt[i]=-62e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=650e-12
+    vr[i]=-78e-3
+    gL[i]=1/(120e6)
+    vt[i]=-70e-3
+    tauvth[i]=1e-3
+    alpha[i]=[1e-3,1e-3,1e-3]
+
+# ============================================================
+# CONNECTION MATRIX
+# ============================================================
+
+spyrpyr=12e-12
+spyrfb=85e-12
+
+sfbpyr=-10e-12
+sfbfb=sfbpyr
+
+sffff=-200e-12
+sffpyr=-10e-12
+
+rminiPYR=15
+rminiFB=15
+rminiFF=20
+
+prminiPYR=0.03
+prAPPYR=0.1
+
+prminiFB=0.01
+prAPFB=0.20
+
+prminiFF=0.05
+prAPFF=0.20
+
+MPYR=100
+MFB=100
+MFF=100
+
+kPYR1=1.0
+kFB1=1.0
+kFF1=1.0
+
+noise=np.array([0.0,0.0,6.35e-9])
+
+T=10
+navgs=10
+dt=1e-4
+rf=1e-3
+ttype=9
+
+W=np.zeros((N,N))
+
+W[PYR1,PYR2]=spyrpyr
+W[PYR1,FB1]=spyrfb
+W[PYR1,FB2]=spyrfb
+W[PYR2,PYR1]=spyrpyr
+W[PYR2,FB1]=spyrfb
+W[PYR2,FB2]=spyrfb
+
+W[FB1,PYR1]=sfbpyr
+W[FB1,PYR2]=sfbpyr
+W[FB1,FB2]=sfbfb
+W[FB2,PYR1]=sfbpyr
+W[FB2,PYR2]=sfbpyr
+W[FB2,FB1]=sfbfb
+
+W[FF1,PYR1]=sffpyr
+W[FF1,PYR2]=sffpyr
+W[FF1,FF2]=sffff
+W[FF2,PYR1]=sffpyr
+W[FF2,PYR2]=sffpyr
+W[FF2,FF1]=sffff
+
+# ============================================================
+# CONNECTION-SPECIFIC DOCKED SV POOLS
+# ============================================================
+
+M=np.zeros((N,N),dtype=int)
+
+M[PYR1,PYR2]=MPYR
+M[PYR1,FB1]=MPYR
+M[PYR1,FB2]=MPYR
+M[PYR2,PYR1]=MPYR
+M[PYR2,FB1]=MPYR
+M[PYR2,FB2]=MPYR
+
+M[FB1,PYR1]=MFB
+M[FB1,PYR2]=MFB
+M[FB1,FB2]=MFB
+M[FB2,PYR1]=MFB
+M[FB2,PYR2]=MFB
+M[FB2,FB1]=MFB
+
+M[FF1,PYR1]=MFF
+M[FF1,PYR2]=MFF
+M[FF1,FF2]=MFF
+M[FF2,PYR1]=MFF
+M[FF2,PYR2]=MFF
+M[FF2,FF1]=MFF
+
+# ============================================================
+# RELEASE PROBABILITIES
+# ============================================================
+
+prmini=np.zeros((N,N))
+prAP=np.zeros((N,N))
+
+for pre in PYR:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prmini[pre,post]=prminiPYR
+            prAP[pre,post]=prAPPYR
+
+for pre in FB:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prmini[pre,post]=prminiFB
+            prAP[pre,post]=prAPFB
+
+for pre in FF:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prmini[pre,post]=prminiFF
+            prAP[pre,post]=prAPFF
+
+# ============================================================
+# SPONTANEOUS MINI EVENT RATES
+# ============================================================
+
+mini_rate=np.zeros(N)
+
+for i in PYR:
+    mini_rate[i]=rminiPYR
+
+for i in FB:
+    mini_rate[i]=rminiFB
+
+for i in FF:
+    mini_rate[i]=rminiFF
+
+# ============================================================
+# REPLENISHMENT
+# ============================================================
+
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
+
+time=np.arange(0,T,dt)
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+# ============================================================
+# GAUSSIAN NOISE
+# ============================================================
+
+def getnoise(noise,i):
+    if i in PYR:
+        return 0.0
+    if i in FB:
+        return 0.0
+    return np.random.normal(0,noise[2])
+
+# ============================================================
+# RATE ACCUMULATION
+# ============================================================
+
+rate_acc=np.zeros((navgs,N))
+
+V_last=None
+I_last=None
+spike_peak_last=None
+Vth_last=None
+ndsv_last=None
+
+# Store spikes from every trial for PSTH
+spikes_all=np.zeros((navgs,N,len(time)))
+
+# ============================================================
+# SIMULATION
+# ============================================================
+
+taui_exc=20e-3
+taui_inh=10e-3
+
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+
+    Ispike=np.zeros((N,N))
+
+    ndsv=M.copy()
+
+    next_refill=np.full((N,N),np.inf)
+    next_mini=np.zeros(N)
+
+    for pre in range(N):
+        if mini_rate[pre]>0:
+            wait=np.random.exponential(1/mini_rate[pre])
+            next_mini[pre]=wait
+        else:
+            next_mini[pre]=np.inf
+
+    if run==navgs-1:
+        spike_peak_last=np.full((N,len(time)),np.nan)
+        I_last=np.zeros((N,len(time)))
+        ndsv_last=np.zeros((N,N,len(time)))
+        ndsv_last[:,:,0]=ndsv
+
+    V[:,0]=V0
+    vth[:,0]=vt
+
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    # ========================================================
+    # TIME LOOP
+    # ========================================================
+
+    for t in range(1,len(time)):
+
+        current_time=t*dt
+
+        # ====================================================
+        # REPLENISH EACH SYNAPTIC POOL INDEPENDENTLY
+        # ====================================================
+
+        for pre in range(N):
+            for post in range(N):
+                if W[pre,post]==0:
+                    continue
+
+                if current_time>=next_refill[pre,post] and ndsv[pre,post]<M[pre,post]:
+                    ndsv[pre,post]+=1
+
+                    if ndsv[pre,post]<M[pre,post]:
+                        rate=k[pre]*(M[pre,post]-ndsv[pre,post])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[pre,post]=current_time+wait
+                    else:
+                        next_refill[pre,post]=np.inf
+
+        # ====================================================
+        # SPONTANEOUS MINI EVENTS
+        # ====================================================
+
+        for pre in range(N):
+            if current_time>=next_mini[pre]:
+
+                for post in range(N):
+                    if W[pre,post]==0:
+                        continue
+
+                    B=np.random.binomial(ndsv[pre,post],prmini[pre,post])
+                    ndsv[pre,post]-=B
+                    Ispike[pre,post]+=W[pre,post]*B
+
+                    if B>0 and ndsv[pre,post]<M[pre,post]:
+                        rate=k[pre]*(M[pre,post]-ndsv[pre,post])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[pre,post]=current_time+wait
+
+                if mini_rate[pre]>0:
+                    wait=np.random.exponential(1/mini_rate[pre])
+                    next_mini[pre]=current_time+wait
+                else:
+                    next_mini[pre]=np.inf
+
+        # ====================================================
+        # DECAY EACH SYNAPTIC CURRENT INDEPENDENTLY
+        # ====================================================
+
+        for pre in range(N):
+            taui=taui_exc if pre in PYR else taui_inh
+
+            for post in range(N):
+                Ispike[pre,post]+=dt*(-Ispike[pre,post]/taui)
+
+        # ====================================================
+        # STORE TOTAL INCOMING CURRENT
+        # ====================================================
+
+        if run==navgs-1:
+            for post in range(N):
+                I_last[post,t]=np.sum(Ispike[:,post])
+
+        # ====================================================
+        # UPDATE NEURONS
+        # ====================================================
+
+        for post in range(N):
+
+            Inoise=getnoise(noise,post)
+            Isyn=np.sum(Ispike[:,post])
+            I=Isyn+Inoise
+
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            vth[post,t]=vth[post,t-1]+dt*dvthdt
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            # =================================================
+            # POSTSYNAPTIC NEURON FIRES AN AP
+            # =================================================
+
+            if V[post,t]>vth[post,t]:
+
+                spikes[post,t]=1
+
+                if run==navgs-1:
+                    spike_peak_last[post,t]=V[post,t]
+
+                rfon[post]=True
+                rftimer[post]=rf
+
+                # AP-EVOKED RELEASE
+
+                for target in range(N):
+                    if W[post,target]==0:
+                        continue
+
+                    B=np.random.binomial(ndsv[post,target],prAP[post,target])
+                    ndsv[post,target]-=B
+                    Ispike[post,target]+=W[post,target]*B
+
+                    if B>0 and ndsv[post,target]<M[post,target]:
+                        rate=k[post]*(M[post,target]-ndsv[post,target])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[post,target]=current_time+wait
+
+                # ADAPTIVE THRESHOLD
+
+                vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2
+                V[post,t]=vr[post]
+
+        # ====================================================
+        # STORE SV POOLS
+        # ====================================================
+
+        if run==navgs-1:
+            ndsv_last[:,:,t]=ndsv
+
+    # ========================================================
+    # SAVE FINAL RUN
+    # ========================================================
+
+    if run==navgs-1:
+        V_last=V.copy()
+        Vth_last=vth.copy()
+
+    # Store this trial's spike trains
+    spikes_all[run]=spikes
+
+    # ========================================================
+    # FIRING RATES
+    # ========================================================
+
+    for i in range(N):
+        spike_times=time[spikes[i]==1]
+
+        if len(spike_times)>1:
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+        else:
+            rate_acc[run,i]=np.nan
+
+# ============================================================
+# MEAN FIRING RATES
+# ============================================================
+
+mean_rate=np.nanmean(rate_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+
+# ============================================================
+# MEMBRANE POTENTIAL AND SV POOL PLOTS
+# ============================================================
+
+fs=15
+
+fig,ax=plt.subplots(6,2,figsize=(16,12),sharex=True)
+
+for i in range(6):
+
+    rate_text=(f", rate = {mean_rate[i]:.2f} Hz, STD={np.nanstd(rate_acc[:,i]):.2f} Hz"
+               if not np.isnan(mean_rate[i]) else ", rate = N/A")
+
+    ax[i,0].plot(time,V_last[i],label="V")
+    ax[i,0].plot(time,Vth_last[i],label="Vth")
+
+    mask=~np.isnan(spike_peak_last[i])
+
+    ax[i,0].scatter(time[mask],spike_peak_last[i,mask],s=60,color="black",zorder=5,label="Spike")
+    ax[i,0].set_ylabel(names[i],fontsize=fs)
+    ax[i,0].set_title(names[i]+rate_text,fontsize=fs)
+    ax[i,0].legend(fontsize=fs-2,loc="upper right")
+    ax[i,0].tick_params(axis="both",labelsize=fs)
+
+    connected_targets=np.where(W[i]!=0)[0]
+
+    for target in connected_targets:
+        ax[i,1].plot(time,ndsv_last[i,target],label=f"{names[i]} to {names[target]}")
+
+    ax[i,1].set_ylabel("n(t)",fontsize=fs)
+    ax[i,1].set_title(names[i]+" Docked SVs",fontsize=fs)
+    ax[i,1].set_ylim(0,np.max(M[i,:])+0.5)
+    ax[i,1].legend(fontsize=fs-2,loc="upper right")
+    ax[i,1].tick_params(axis="both",labelsize=fs)
+
+ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
+ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
+
+plt.tight_layout()
+plt.show()
+
+#%% Conventional trial-averaged PSTHs
+
+bin_width=0.05
+bins=np.arange(0,T+bin_width,bin_width)
+bin_centers=(bins[:-1]+bins[1:])/2
+
+psth_trials=np.zeros((navgs,3,len(bin_centers)))
+
+populations=[PYR,FB,FF]
+population_names=["PYR","FB","FF"]
+
+for run in range(navgs):
+    for p,pop in enumerate(populations):
+
+        population_spikes=np.sum(spikes_all[run,pop],axis=0)
+        spike_times=time[population_spikes>0]
+        counts,_=np.histogram(spike_times,bins=bins)
+
+        psth_trials[run,p]=counts/bin_width/len(pop)
+
+psth_mean=np.mean(psth_trials,axis=0)
+psth_std=np.std(psth_trials,axis=0)
+
+fig,ax=plt.subplots(3,1,figsize=(12,9),sharex=True)
+
+for p in range(3):
+
+    ax[p].plot(
+        bin_centers,
+        psth_mean[p],
+        linewidth=2,
+        label=population_names[p],
+        marker="o"
+    )
+
+    ax[p].fill_between(
+        bin_centers,
+        psth_mean[p]-psth_std[p],
+        psth_mean[p]+psth_std[p],
+        alpha=0.2
+    )
+
+    ax[p].set_ylabel("Firing rate (Hz)",fontsize=fs)
+    ax[p].set_title(population_names[p]+" Trial-Averaged PSTH",fontsize=fs)
+    ax[p].tick_params(axis="both",labelsize=fs)
+    ax[p].legend(fontsize=fs-2)
+
+ax[-1].set_xlabel("Time (sec)",fontsize=fs)
 
 plt.tight_layout()
 plt.show()
