@@ -9333,9 +9333,8 @@ for i,times in enumerate(tdata):
         plt.tick_params(axis="both",labelsize=15)
         plt.tight_layout()
         plt.show()
-        
 
-#%% 8 - Connections with random OB inputs sampled - 2
+#%% 8 - Connections with random OB inputs sampled - 2 delay time with noise
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9345,7 +9344,6 @@ from tqdm import tqdm
 N=6
 PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
 names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
-
 PYR=[PYR1,PYR2]
 FB=[FB1,FB2]
 FF=[FF1,FF2]
@@ -9387,12 +9385,9 @@ for i in FF:
 
 # ============================================================
 # CONNECTION MATRIX
-# W[pre,post] = 1 if the synaptic connection exists
-# W[pre,post] = 0 if the synaptic connection does not exist
 # ============================================================
 
 W=np.zeros((N,N))
-
 W[PYR1,PYR2]=1
 W[PYR1,FB1]=1
 W[PYR1,FB2]=0
@@ -9429,7 +9424,7 @@ RISE_PYR_PYR=0.2e-3
 FALL_PYR_PYR=20e-3
 
 # PYR -> FB
-AP_PYR_FB=700e-12#117e-12 # change this if it's not balanced yet
+AP_PYR_FB=1500e-12
 MINI_PYR_FB=17.3e-12
 RATE_PYR_FB=9.5
 RISE_PYR_FB=0.2e-3
@@ -9449,13 +9444,36 @@ RATE_FF_PYR=9.8
 RISE_FF_PYR=2e-3
 FALL_FF_PYR=10e-3
 
-# into the PYR neuron, it will be 6*N_OB for the FF neuron
+# OB -> PYR / FF
 N_OB=21
 A_OB_PYR=38.6e-12
 A_OB_FF=43.1e-12
 A_OB_FF2=43.1e-12*0
 tau_OB_rise=0.2e-3
 tau_OB_decay=1e-3
+
+# ============================================================
+# TRANSMISSION DELAYS
+# ============================================================
+
+tdelay_OB_PYR=2e-3
+tdelay_OB_FF=2e-3
+tdelay_PYR_PYR=2e-3
+tdelay_PYR_FB=2e-3
+tdelay_FB_PYR=2e-3
+tdelay_FF_PYR=2e-3
+
+# ============================================================
+# GAUSSIAN NOISE
+# ============================================================
+
+NOISE_FB=100e-12
+NOISE_FF=30e-12
+noise=np.array([0.0,NOISE_FB,NOISE_FF])
+
+# ============================================================
+# SIMULATION PARAMETERS
+# ============================================================
 
 kPYR1=1
 kFB1=1
@@ -9466,7 +9484,6 @@ prAPFF=0.5
 MPYR=5
 MFB=5
 MFF=5
-noise=np.array([0.0,0.0,0*150e-12])
 T=2
 navgs=1
 dt=1e-4
@@ -9475,71 +9492,59 @@ ttype=9
 ptype=0
 
 # ============================================================
-# OB FIRING-TIME DATA
-# Each row of tdata is the firing-time sequence of one OB neuron.
-# The Excel firing times are in milliseconds, so they are
-# converted to seconds here.
+# OB FIRING DATA
 # ============================================================
 
 file_path=r"C:\Users\Oliver\Desktop\Research\PYR\Spike Timing Data.xlsx"
 datad=pd.read_excel(file_path)
 tdata=np.array([row.dropna().values/1000 for _,row in datad.iloc[:,2:].iterrows()],dtype=object)
 
-rng=np.random.default_rng()
+# ============================================================
+# TIME
+# ============================================================
 
-PYR1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
-PYR2_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
-FF1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=6*N_OB,replace=False)]
+time=np.arange(0,T,dt)
 
 # ============================================================
-# OB INPUT
+# OB CURRENT
 # ============================================================
 
 t_peak_OB=(tau_OB_rise*tau_OB_decay/(tau_OB_decay-tau_OB_rise))*np.log(tau_OB_decay/tau_OB_rise)
 OB_norm=np.exp(-t_peak_OB/tau_OB_decay)-np.exp(-t_peak_OB/tau_OB_rise)
 
-def make_ob_current(time,firing_times,amplitude):
+def make_ob_current(time,firing_times,amplitude,delay):
     I_OB=np.zeros(len(time))
-
     for times in firing_times:
         for t_fire in times:
             if t_fire<0 or t_fire>=T:
                 continue
-
-            start=np.searchsorted(time,t_fire)
-
+            t_start=t_fire+delay
+            if t_start>=T:
+                continue
+            start=np.searchsorted(time,t_start)
             if start>=len(time):
                 continue
-
-            t_rel=time[start:]-t_fire
-
+            t_rel=time[start:]-t_start
             I_OB[start:]+=amplitude*(np.exp(-t_rel/tau_OB_decay)-np.exp(-t_rel/tau_OB_rise))/OB_norm
-
     return I_OB
 
 # ============================================================
-# CONNECTION-SPECIFIC DOCKED SV POOLS
-#
-# M[pre,post] is the number of docked SVs belonging ONLY to
-# the synapse from pre to post.
+# CONNECTION-SPECIFIC SV POOLS
 # ============================================================
 
 M=np.zeros((N,N),dtype=int)
-
 M[PYR1,PYR2]=MPYR
 M[PYR1,FB1]=MPYR
 M[PYR1,FB2]=MPYR
 M[PYR2,PYR1]=MPYR
 M[PYR2,FB1]=MPYR
 M[PYR2,FB2]=MPYR
-
 M[FB1,PYR1]=MFB
 M[FB1,PYR2]=MFB
 M[FB1,FB2]=MFB
 M[FB2,PYR1]=MFB
 M[FB2,PYR2]=MFB
 M[FB2,FB1]=MFB
-
 M[FF1,PYR1]=MFF
 M[FF1,PYR2]=MFF
 M[FF1,FF2]=MFF
@@ -9549,54 +9554,38 @@ M[FF2,FF1]=MFF
 
 # ============================================================
 # AP RELEASE PROBABILITIES
-#
-# prAP[pre,post] = fusion probability during an AP
-#                  generated by the presynaptic neuron
 # ============================================================
 
 prAP=np.zeros((N,N))
-
 for pre in PYR:
     for post in range(N):
         if W[pre,post]!=0:
             prAP[pre,post]=prAPPYR
-
 for pre in FB:
     for post in range(N):
         if W[pre,post]!=0:
             prAP[pre,post]=prAPFB
-
 for pre in FF:
     for post in range(N):
         if W[pre,post]!=0:
             prAP[pre,post]=prAPFF
 
 # ============================================================
-# SPONTANEOUS MINI EVENT RATES
-#
-# Each synaptic connection has its own independent
-# Poisson process.
+# MINI EVENT RATES
 # ============================================================
 
 mini_rate=np.zeros((N,N))
-
 mini_rate[PYR1,PYR2]=RATE_PYR_PYR
 mini_rate[PYR2,PYR1]=RATE_PYR_PYR
-
 mini_rate[PYR1,FB1]=RATE_PYR_FB
 mini_rate[PYR2,FB1]=RATE_PYR_FB
-
 mini_rate[FB1,PYR1]=RATE_FB_PYR
 mini_rate[FB1,PYR2]=RATE_FB_PYR
-
 mini_rate[FF1,PYR1]=RATE_FF_PYR
 mini_rate[FF1,PYR2]=RATE_FF_PYR
 
 # ============================================================
-# REPLENISHMENT RATE COEFFICIENT
-#
-# Still presynaptic-neuron-specific.
-# Each connection-specific pool independently refills.
+# REPLENISHMENT RATES
 # ============================================================
 
 kPYR2=kPYR1
@@ -9604,19 +9593,8 @@ kFB2=kFB1
 kFF2=kFF1
 k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
 
-time=np.arange(0,T,dt)
-
-if ttype==0:
-    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
-
-if ttype==1:
-    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
-
-if ttype==2:
-    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
-
 # ============================================================
-# SYNAPTIC CURRENT PARAMETERS
+# CONNECTION-SPECIFIC CURRENT PARAMETERS
 # ============================================================
 
 AP_amplitude=np.zeros((N,N))
@@ -9661,26 +9639,49 @@ tau_fall[FF1,PYR1]=FALL_FF_PYR
 tau_fall[FF1,PYR2]=FALL_FF_PYR
 
 # ============================================================
+# SYNAPTIC DELAYS
+# ============================================================
+
+syn_delay=np.zeros((N,N))
+syn_delay[PYR1,PYR2]=tdelay_PYR_PYR
+syn_delay[PYR2,PYR1]=tdelay_PYR_PYR
+syn_delay[PYR1,FB1]=tdelay_PYR_FB
+syn_delay[PYR2,FB1]=tdelay_PYR_FB
+syn_delay[FB1,PYR1]=tdelay_FB_PYR
+syn_delay[FB1,PYR2]=tdelay_FB_PYR
+syn_delay[FF1,PYR1]=tdelay_FF_PYR
+syn_delay[FF1,PYR2]=tdelay_FF_PYR
+
+# ============================================================
 # GAUSSIAN NOISE
-#
-# Only FF1 and FF2 receive Gaussian noise.
-# PYR and FB neurons receive no Gaussian noise.
 # ============================================================
 
 def getnoise(noise,i):
     if i in PYR:
         return 0.0
     if i in FB:
-        return 0.0
-    return abs(np.random.normal(0,noise[2]))
+        return -abs(np.random.normal(0,noise[1]))
+    if i in FF:
+        return -abs(np.random.normal(0,noise[2]))
+    return 0.0
 
 # ============================================================
-# RATE ACCUMULATION
+# DISABLE CONNECTIONS FOR DIFFERENT TEST TYPES
+# ============================================================
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+# ============================================================
+# STORAGE
 # ============================================================
 
 rate_acc=np.zeros((navgs,N))
 std_acc=np.zeros((navgs,N))
-
 V_last=None
 I_last=None
 spike_peak_last=None
@@ -9691,54 +9692,39 @@ Vth_last=None
 # ============================================================
 
 for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+    rng=np.random.default_rng()
+    PYR1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
+    PYR2_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
+    FF1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=6*N_OB,replace=False)]
 
     V=np.zeros((N,len(time)))
     vth=np.zeros((N,len(time)))
     spikes=np.zeros((N,len(time)))
-
-    # Ispike[pre,post] is the current generated at the
-    # connection from pre to post.
     Ispike=np.zeros((N,N))
-
-    # Separate exponential components for every connection.
     I_decay=np.zeros((N,N))
     I_rise=np.zeros((N,N))
-
-    # Each synaptic connection has its own independent pool.
+    pending_AP=[]
     ndsv=M.copy()
-
-    # Independent replenishment timer for every synapse.
     next_refill=np.full((N,N),np.inf)
-
-    # Independent next mini-event time for every
-    # presynaptic-to-postsynaptic connection.
     next_mini=np.full((N,N),np.inf)
 
     for pre in range(N):
         for post in range(N):
             if W[pre,post]==0:
                 continue
-
             if mini_rate[pre,post]>0:
                 wait=np.random.exponential(1/mini_rate[pre,post])
                 next_mini[pre,post]=wait
 
     if run==navgs-1:
         spike_peak_last=np.full((N,len(time)),np.nan)
-
-        # Store total incoming current for every neuron.
         I_last=np.zeros((N,len(time)))
-
-        # Store connection-specific incoming currents.
-        # Iconn_last[pre,post,t] is the current from pre into post.
         Iconn_last=np.zeros((N,N,len(time)))
-
-        # Store OB current separately.
         I_OB_last=np.zeros((N,len(time)))
+        I_noise_last=np.zeros((N,len(time)))
 
     V[:,0]=V0
     vth[:,0]=vt
-
     rfon=np.zeros(N)
     rftimer=np.ones(N)*np.inf
 
@@ -9746,18 +9732,36 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
     # PRECOMPUTE OB CURRENTS
     # ========================================================
 
-    I_OB_PYR1=make_ob_current(time,PYR1_OB_times,A_OB_PYR)
-    I_OB_PYR2=make_ob_current(time,PYR2_OB_times,A_OB_PYR)
-    I_OB_FF1=make_ob_current(time,FF1_OB_times,A_OB_FF)
-    I_OB_FF2=make_ob_current(time,[],A_OB_FF2)
+    I_OB_PYR1=make_ob_current(time,PYR1_OB_times,A_OB_PYR,tdelay_OB_PYR)
+    I_OB_PYR2=make_ob_current(time,PYR2_OB_times,A_OB_PYR,tdelay_OB_PYR)
+    I_OB_FF1=make_ob_current(time,FF1_OB_times,A_OB_FF,tdelay_OB_FF)
+    I_OB_FF2=make_ob_current(time,[],A_OB_FF2,tdelay_OB_FF)
 
     # ========================================================
     # TIME LOOP
     # ========================================================
 
     for t in range(1,len(time)):
-
         current_time=t*dt
+
+        # ====================================================
+        # START DELAYED AP-EVOKED SYNAPTIC CURRENTS
+        # ====================================================
+
+        if pending_AP:
+            remaining_AP=[]
+            for start_time,pre,target,B in pending_AP:
+                if current_time>=start_time:
+                    if tau_rise[pre,target]>0 and tau_fall[pre,target]>0:
+                        t_peak=(tau_rise[pre,target]*tau_fall[pre,target]/(tau_fall[pre,target]-tau_rise[pre,target]))*np.log(tau_fall[pre,target]/tau_rise[pre,target])
+                        norm=np.exp(-t_peak/tau_fall[pre,target])-np.exp(-t_peak/tau_rise[pre,target])
+                        I_decay[pre,target]+=AP_amplitude[pre,target]*B/norm
+                        I_rise[pre,target]+=AP_amplitude[pre,target]*B/norm
+                    else:
+                        Ispike[pre,target]+=AP_amplitude[pre,target]*B
+                else:
+                    remaining_AP.append((start_time,pre,target,B))
+            pending_AP=remaining_AP
 
         # ====================================================
         # REPLENISH EACH SYNAPTIC POOL INDEPENDENTLY
@@ -9767,10 +9771,8 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
             for post in range(N):
                 if W[pre,post]==0:
                     continue
-
                 if current_time>=next_refill[pre,post] and ndsv[pre,post]<M[pre,post]:
                     ndsv[pre,post]+=1
-
                     if ndsv[pre,post]<M[pre,post]:
                         rate=k[pre]*(M[pre,post]-ndsv[pre,post])
                         wait=np.random.exponential(1/rate)
@@ -9780,23 +9782,15 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
         # ====================================================
         # SPONTANEOUS MINI EVENTS
-        #
-        # Each synaptic connection has its own independent
-        # Poisson process.
-        #
-        # Each mini event releases exactly one docked SV.
         # ====================================================
 
         for pre in range(N):
             for post in range(N):
                 if W[pre,post]==0:
                     continue
-
                 if current_time>=next_mini[pre,post]:
-
                     if ndsv[pre,post]>0:
                         ndsv[pre,post]-=1
-
                         if tau_rise[pre,post]>0 and tau_fall[pre,post]>0:
                             t_peak=(tau_rise[pre,post]*tau_fall[pre,post]/(tau_fall[pre,post]-tau_rise[pre,post]))*np.log(tau_fall[pre,post]/tau_rise[pre,post])
                             norm=np.exp(-t_peak/tau_fall[pre,post])-np.exp(-t_peak/tau_rise[pre,post])
@@ -9804,12 +9798,10 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                             I_rise[pre,post]+=mini_amplitude[pre,post]/norm
                         else:
                             Ispike[pre,post]+=mini_amplitude[pre,post]
-
                         if ndsv[pre,post]<M[pre,post]:
                             rate=k[pre]*(M[pre,post]-ndsv[pre,post])
                             wait=np.random.exponential(1/rate)
                             next_refill[pre,post]=current_time+wait
-
                     if mini_rate[pre,post]>0:
                         wait=np.random.exponential(1/mini_rate[pre,post])
                         next_mini[pre,post]=current_time+wait
@@ -9817,26 +9809,20 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                         next_mini[pre,post]=np.inf
 
         # ====================================================
-        # DECAY EACH SYNAPTIC CURRENT INDEPENDENTLY
+        # DECAY SYNAPTIC CURRENTS
         # ====================================================
 
         for pre in range(N):
             for post in range(N):
                 if W[pre,post]==0:
                     continue
-
                 if tau_rise[pre,post]>0 and tau_fall[pre,post]>0:
                     I_decay[pre,post]+=dt*(-I_decay[pre,post]/tau_fall[pre,post])
                     I_rise[pre,post]+=dt*(-I_rise[pre,post]/tau_rise[pre,post])
                     Ispike[pre,post]=I_decay[pre,post]-I_rise[pre,post]
 
         # ====================================================
-        # OB INPUT CURRENT
-        #
-        # PYR1 receives N_OB actual OB neurons.
-        # PYR2 receives N_OB actual OB neurons.
-        # FF1 receives 6*N_OB actual OB neurons.
-        # FF2 has an OB pathway with zero amplitude.
+        # OB CURRENT
         # ====================================================
 
         I_OB_PYR1_t=I_OB_PYR1[t]
@@ -9845,18 +9831,13 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         I_OB_FF2_t=I_OB_FF2[t]
 
         # ====================================================
-        # STORE INCOMING CURRENTS
-        #
-        # Iconn_last[pre,post,t] = current from pre into post.
-        # I_last[post,t] = total synaptic current entering post.
+        # STORE CURRENTS
         # ====================================================
 
         if run==navgs-1:
             Iconn_last[:,:,t]=Ispike
-
             for post in range(N):
                 I_last[post,t]=np.sum(Ispike[:,post])
-
             I_OB_last[PYR1,t]=I_OB_PYR1_t
             I_OB_last[PYR2,t]=I_OB_PYR2_t
             I_OB_last[FF1,t]=I_OB_FF1_t
@@ -9867,7 +9848,6 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         # ====================================================
 
         for post in range(N):
-
             Inoise=getnoise(noise,post)
             Isyn=np.sum(Ispike[:,post])
 
@@ -9884,9 +9864,11 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
             I=Isyn+I_OB+Inoise
 
+            if run==navgs-1:
+                I_noise_last[post,t]=Inoise
+
             i_ion=gL[post]*(V[post,t-1]-V0[post])
             dVdt=(I-i_ion)/C_m[post]
-
             V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
 
             dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
@@ -9894,17 +9876,15 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
             if rftimer[post]!=np.inf:
                 rftimer[post]-=dt
-
             if rftimer[post]<=0:
                 rftimer[post]=np.inf
                 rfon[post]=False
 
             # =================================================
-            # POSTSYNAPTIC NEURON FIRES AN AP
+            # AP
             # =================================================
 
             if V[post,t]>vth[post,t]:
-
                 spikes[post,t]=1
 
                 if run==navgs-1:
@@ -9915,32 +9895,18 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
                 # =============================================
                 # AP-EVOKED RELEASE
-                #
-                # The AP from 'post' acts as a presynaptic AP
-                # onto every target of neuron 'post'.
-                #
-                # Each connection independently draws from
-                # its own SV pool using prAP[post,target].
                 # =============================================
 
                 for target in range(N):
-
                     if W[post,target]==0:
                         continue
 
                     B=np.random.binomial(ndsv[post,target],prAP[post,target])
-
                     ndsv[post,target]-=B
 
                     if B>0:
-
-                        if tau_rise[post,target]>0 and tau_fall[post,target]>0:
-                            t_peak=(tau_rise[post,target]*tau_fall[post,target]/(tau_fall[post,target]-tau_rise[post,target]))*np.log(tau_fall[post,target]/tau_rise[post,target])
-                            norm=np.exp(-t_peak/tau_fall[post,target])-np.exp(-t_peak/tau_rise[post,target])
-                            I_decay[post,target]+=AP_amplitude[post,target]*B/norm
-                            I_rise[post,target]+=AP_amplitude[post,target]*B/norm
-                        else:
-                            Ispike[post,target]+=AP_amplitude[post,target]*B
+                        start_time=current_time+syn_delay[post,target]
+                        pending_AP.append((start_time,post,target,B))
 
                     if B>0 and ndsv[post,target]<M[post,target]:
                         rate=k[post]*(M[post,target]-ndsv[post,target])
@@ -9952,7 +9918,6 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                 # =============================================
 
                 vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2
-
                 V[post,t]=vr[post]
 
     # ========================================================
@@ -9964,30 +9929,22 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         Vth_last=vth.copy()
 
     # ========================================================
-    # FIRING RATES AND STD FOR THIS RUN
+    # FIRING RATES
     # ========================================================
 
     for i in range(N):
-
         spike_times=time[spikes[i]==1]
-
         if len(spike_times)>1:
-
             isi=np.diff(spike_times)
-
-            # Rate for this run
             rate_acc[run,i]=1/np.mean(isi)
-
-            # STD for this run in Hz
             rate_per_isi=1/isi
             std_acc[run,i]=np.std(rate_per_isi)
-
         else:
             rate_acc[run,i]=np.nan
             std_acc[run,i]=np.nan
 
 # ============================================================
-# MEAN FIRING RATES AND STD
+# MEAN FIRING RATES
 # ============================================================
 
 mean_rate=np.nanmean(rate_acc,axis=0)
@@ -9996,10 +9953,8 @@ mean_std=np.nanmean(std_acc,axis=0)
 
 print("Mean firing rates (Hz):")
 print(mean_rate)
-
 print("STD of mean firing rates across runs (Hz):")
 print(std_rate)
-
 print("Mean STD within runs (Hz):")
 print(mean_std)
 
@@ -10008,26 +9963,20 @@ print(mean_std)
 # ============================================================
 
 fs=15
-
 plot_neurons=[PYR1,PYR2,FB1,FF1]
 
 if ptype==0:
-
     fig,ax=plt.subplots(4,2,figsize=(16,10),sharex=True)
 
     for j,i in enumerate(plot_neurons):
-
-        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates ={std_rate[i]:.2f} Hz"
-                   if not np.isnan(mean_rate[i]) else "rate = N/A")
+        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
 
         # ====================================================
         # MEMBRANE POTENTIAL
         # ====================================================
 
         ax[j,0].plot(time,V_last[i]*1000,label="V")
-
         mask=~np.isnan(spike_peak_last[i])
-
         ax[j,0].scatter(time[mask],spike_peak_last[i,mask]*1000,s=60,color="black",zorder=5,label="Spike")
         ax[j,0].set_ylabel(names[i]+" (mV)",fontsize=fs)
 
@@ -10042,7 +9991,7 @@ if ptype==0:
         ax[j,0].tick_params(axis="both",labelsize=fs)
 
         # ====================================================
-        # INCOMING SYNAPTIC CURRENTS
+        # INCOMING CURRENTS
         # ====================================================
 
         connected_inputs=np.where(W[:,i]!=0)[0]
@@ -10052,6 +10001,9 @@ if ptype==0:
 
         if i in [PYR1,PYR2,FF1]:
             ax[j,1].plot(time,I_OB_last[i]*1e12,label="OB")
+
+        if i in FB or i in FF:
+            ax[j,1].plot(time,I_noise_last[i]*1e12,label="Gaussian noise")
 
         ax[j,1].set_ylabel("I(t) (pA)",fontsize=fs)
 
@@ -10067,36 +10019,28 @@ if ptype==0:
 
     ax[-1,0].set_xlabel("Time (sec)",fontsize=fs)
     ax[-1,1].set_xlabel("Time (sec)",fontsize=fs)
-
     plt.tight_layout()
     plt.show()
 
 elif ptype==1:
-
     n_inputs=[]
 
     for i in plot_neurons:
-        n_inputs.append(len(np.where(W[:,i]!=0)[0])+(1 if i in [PYR1,PYR2,FF1] else 0))
+        n_inputs.append(len(np.where(W[:,i]!=0)[0])+(1 if i in [PYR1,PYR2,FF1] else 0)+(1 if i in FB or i in FF else 0))
 
     nrows=max(1+np.max(n_inputs),2)
-
     fig,ax=plt.subplots(nrows,4,figsize=(20,4*nrows),sharex=True,squeeze=False)
 
     for j,i in enumerate(plot_neurons):
-
-        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates ={std_rate[i]:.2f} Hz"
-                   if not np.isnan(mean_rate[i]) else "rate = N/A")
+        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
 
         # ====================================================
         # MEMBRANE POTENTIAL
         # ====================================================
 
         vax=ax[0,j]
-
         vax.plot(time,V_last[i]*1000,label="V")
-
         mask=~np.isnan(spike_peak_last[i])
-
         vax.scatter(time[mask],spike_peak_last[i,mask]*1000,s=60,color="black",zorder=5,label="Spike")
         vax.set_ylabel(names[i]+" (mV)",fontsize=fs)
 
@@ -10115,33 +10059,33 @@ elif ptype==1:
         # ====================================================
 
         row=1
-
         connected_inputs=np.where(W[:,i]!=0)[0]
 
         for pre in connected_inputs:
-
             iax=ax[row,j]
-
             iax.plot(time,Iconn_last[pre,i]*1e12,label=f"{names[pre]}")
             iax.set_ylabel("I (pA)",fontsize=fs)
             iax.set_title(names[pre]+" to "+names[i],fontsize=fs)
-
             iax.legend(fontsize=fs-2,loc="upper right")
-            iax.tick_params(axis="both",labelsize=fs)
-
+            iax.tick_params(axis="both",labelsize=fs-2)
             row+=1
 
         if i in [PYR1,PYR2,FF1]:
-
             iax=ax[row,j]
-
             iax.plot(time,I_OB_last[i]*1e12,label="OB")
             iax.set_ylabel("I (pA)",fontsize=fs)
             iax.set_title("OB to "+names[i],fontsize=fs)
-
             iax.legend(fontsize=fs-2,loc="upper right")
             iax.tick_params(axis="both",labelsize=fs)
+            row+=1
 
+        if i in FB or i in FF:
+            iax=ax[row,j]
+            iax.plot(time,I_noise_last[i]*1e12,label="Gaussian noise")
+            iax.set_ylabel("I (pA)",fontsize=fs)
+            iax.set_title("Inhibitory Gaussian noise to "+names[i],fontsize=fs)
+            iax.legend(fontsize=fs-2,loc="upper right")
+            iax.tick_params(axis="both",labelsize=fs)
             row+=1
 
         # ====================================================
@@ -10155,10 +10099,10 @@ elif ptype==1:
 
     plt.tight_layout()
     plt.show()
-
-
 #%%
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 # file = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV\VT NOISE\v_t_trace_trial_1.csv'
 file=r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv\v-t noise\v_t_trace_trial_5.csv'
