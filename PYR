@@ -9333,8 +9333,24 @@ for i,times in enumerate(tdata):
         plt.tick_params(axis="both",labelsize=15)
         plt.tight_layout()
         plt.show()
+#%% example trace
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
-#%% 8 - Connections with random OB inputs sampled - 2 delay time with noise
+# file = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV\VT NOISE\v_t_trace_trial_1.csv'
+file=r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv\v-t noise\v_t_trace_trial_5.csv'
+file=r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV\VT NOISE\v_t_trace_trial_5.csv'
+
+x = pd.read_csv(file)
+
+x=np.array(x)
+plt.plot(x[:,0],x[:,1])
+# plt.ylim([-85,-60]) # FF
+# plt.ylim([-100,-50]) # FB
+plt.show()
+
+#%% 8 - Connections with random OB inputs sampled - 2 delay time with Gaussian minis
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9352,8 +9368,8 @@ V0=np.zeros(N)
 C_m=np.zeros(N)
 vr=np.zeros(N)
 gL=np.zeros(N)
-vt=np.zeros(N)
-tauvth=np.zeros(N)
+V_threshold=np.zeros(N)
+tau_vth=np.zeros(N)
 alpha=np.zeros((N,3))
 
 for i in PYR:
@@ -9361,8 +9377,8 @@ for i in PYR:
     C_m[i]=300e-12
     vr[i]=-78e-3
     gL[i]=1/(50e6)
-    vt[i]=-77e-3
-    tauvth[i]=7e-3
+    V_threshold[i]=-77e-3
+    tau_vth[i]=7e-3
     alpha[i]=[75e-3,0,0]
 
 for i in FB:
@@ -9370,8 +9386,8 @@ for i in FB:
     C_m[i]=250e-12
     vr[i]=-78e-3
     gL[i]=1/(50e6)
-    vt[i]=-62e-3
-    tauvth[i]=1e-3
+    V_threshold[i]=-62e-3
+    tau_vth[i]=1e-3
     alpha[i]=[1e-3,1e-3,1e-3]
 
 for i in FF:
@@ -9379,8 +9395,8 @@ for i in FF:
     C_m[i]=650e-12
     vr[i]=-78e-3
     gL[i]=1/(120e6)
-    vt[i]=-70e-3
-    tauvth[i]=1e-3
+    V_threshold[i]=-70e-3
+    tau_vth[i]=1e-3
     alpha[i]=[1e-3,1e-3,1e-3]
 
 # ============================================================
@@ -9388,6 +9404,7 @@ for i in FF:
 # ============================================================
 
 W=np.zeros((N,N))
+
 W[PYR1,PYR2]=1
 W[PYR1,FB1]=1
 W[PYR1,FB2]=0
@@ -9416,39 +9433,27 @@ W[FF2,FF1]=0
 # SYNAPTIC PARAMETERS
 # ============================================================
 
-# PYR -> PYR
 AP_PYR_PYR=500e-12
-MINI_PYR_PYR=17.3e-12
-RATE_PYR_PYR=9.5
 RISE_PYR_PYR=0.2e-3
 FALL_PYR_PYR=20e-3
 
-# PYR -> FB
-AP_PYR_FB=1500e-12
-MINI_PYR_FB=17.3e-12
-RATE_PYR_FB=9.5
+AP_PYR_FB=10e-12
 RISE_PYR_FB=0.2e-3
 FALL_PYR_FB=2.63e-3
 
-# FB -> PYR
 AP_FB_PYR=-159e-12
-MINI_FB_PYR=-16.8e-12
-RATE_FB_PYR=9.8
 RISE_FB_PYR=0.68e-3
 FALL_FB_PYR=10e-3
 
-# FF -> PYR
 AP_FF_PYR=-60e-12
-MINI_FF_PYR=-16.8e-12
-RATE_FF_PYR=9.8
 RISE_FF_PYR=2e-3
 FALL_FF_PYR=10e-3
 
-# OB -> PYR / FF
 N_OB=21
-A_OB_PYR=38.6e-12
-A_OB_FF=43.1e-12
+A_OB_PYR=38.6e-12*0
+A_OB_FF=30e-12*0
 A_OB_FF2=43.1e-12*0
+
 tau_OB_rise=0.2e-3
 tau_OB_decay=1e-3
 
@@ -9458,18 +9463,25 @@ tau_OB_decay=1e-3
 
 tdelay_OB_PYR=2e-3
 tdelay_OB_FF=2e-3
+
 tdelay_PYR_PYR=2e-3
 tdelay_PYR_FB=2e-3
-tdelay_FB_PYR=2e-3
+
+tdelay_FB_PYR=1.25e-3
 tdelay_FF_PYR=2e-3
 
 # ============================================================
-# GAUSSIAN NOISE
+# GAUSSIAN MINI STANDARD DEVIATIONS
 # ============================================================
 
-NOISE_FB=100e-12
-NOISE_FF=30e-12
-noise=np.array([0.0,NOISE_FB,NOISE_FF])
+NOISE_PYR_PYR_POS=2e-12
+NOISE_PYR_FB_POS=1e-12
+
+NOISE_FB_PYR_NEG=1e-12
+NOISE_FF_PYR_NEG=1e-12
+
+NOISE_FB1_SELF=1500e-12
+NOISE_FF1_SELF=500e-12
 
 # ============================================================
 # SIMULATION PARAMETERS
@@ -9484,6 +9496,10 @@ prAPFF=0.5
 MPYR=5
 MFB=5
 MFF=5
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
 T=2
 navgs=1
 dt=1e-4
@@ -9557,48 +9573,27 @@ M[FF2,FF1]=MFF
 # ============================================================
 
 prAP=np.zeros((N,N))
+
 for pre in PYR:
     for post in range(N):
         if W[pre,post]!=0:
             prAP[pre,post]=prAPPYR
+
 for pre in FB:
     for post in range(N):
         if W[pre,post]!=0:
             prAP[pre,post]=prAPFB
+
 for pre in FF:
     for post in range(N):
         if W[pre,post]!=0:
             prAP[pre,post]=prAPFF
 
 # ============================================================
-# MINI EVENT RATES
-# ============================================================
-
-mini_rate=np.zeros((N,N))
-mini_rate[PYR1,PYR2]=RATE_PYR_PYR
-mini_rate[PYR2,PYR1]=RATE_PYR_PYR
-mini_rate[PYR1,FB1]=RATE_PYR_FB
-mini_rate[PYR2,FB1]=RATE_PYR_FB
-mini_rate[FB1,PYR1]=RATE_FB_PYR
-mini_rate[FB1,PYR2]=RATE_FB_PYR
-mini_rate[FF1,PYR1]=RATE_FF_PYR
-mini_rate[FF1,PYR2]=RATE_FF_PYR
-
-# ============================================================
-# REPLENISHMENT RATES
-# ============================================================
-
-kPYR2=kPYR1
-kFB2=kFB1
-kFF2=kFF1
-k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
-
-# ============================================================
 # CONNECTION-SPECIFIC CURRENT PARAMETERS
 # ============================================================
 
 AP_amplitude=np.zeros((N,N))
-mini_amplitude=np.zeros((N,N))
 tau_rise=np.zeros((N,N))
 tau_fall=np.zeros((N,N))
 
@@ -9610,15 +9605,6 @@ AP_amplitude[FB1,PYR1]=AP_FB_PYR
 AP_amplitude[FB1,PYR2]=AP_FB_PYR
 AP_amplitude[FF1,PYR1]=AP_FF_PYR
 AP_amplitude[FF1,PYR2]=AP_FF_PYR
-
-mini_amplitude[PYR1,PYR2]=MINI_PYR_PYR
-mini_amplitude[PYR2,PYR1]=MINI_PYR_PYR
-mini_amplitude[PYR1,FB1]=MINI_PYR_FB
-mini_amplitude[PYR2,FB1]=MINI_PYR_FB
-mini_amplitude[FB1,PYR1]=MINI_FB_PYR
-mini_amplitude[FB1,PYR2]=MINI_FB_PYR
-mini_amplitude[FF1,PYR1]=MINI_FF_PYR
-mini_amplitude[FF1,PYR2]=MINI_FF_PYR
 
 tau_rise[PYR1,PYR2]=RISE_PYR_PYR
 tau_rise[PYR2,PYR1]=RISE_PYR_PYR
@@ -9653,17 +9639,26 @@ syn_delay[FF1,PYR1]=tdelay_FF_PYR
 syn_delay[FF1,PYR2]=tdelay_FF_PYR
 
 # ============================================================
-# GAUSSIAN NOISE
+# GAUSSIAN MINI CURRENTS
 # ============================================================
 
-def getnoise(noise,i):
-    if i in PYR:
-        return 0.0
-    if i in FB:
-        return -abs(np.random.normal(0,noise[1]))
-    if i in FF:
-        return -abs(np.random.normal(0,noise[2]))
-    return 0.0
+def get_mini_currents():
+    I_mini=np.zeros((N,N))
+    noise_PYR1_PYR2=abs(np.random.normal(0,NOISE_PYR_PYR_POS))
+    noise_PYR2_PYR1=abs(np.random.normal(0,NOISE_PYR_PYR_POS))
+    noise_PYR1_FB1=abs(np.random.normal(0,NOISE_PYR_FB_POS))
+    noise_PYR2_FB1=abs(np.random.normal(0,NOISE_PYR_FB_POS))
+    noise_FB1=abs(np.random.normal(0,NOISE_FB_PYR_NEG))
+    noise_FF1=abs(np.random.normal(0,NOISE_FF_PYR_NEG))
+    I_mini[PYR1,PYR2]=noise_PYR1_PYR2
+    I_mini[PYR2,PYR1]=noise_PYR2_PYR1
+    I_mini[PYR1,FB1]=noise_PYR1_FB1
+    I_mini[PYR2,FB1]=noise_PYR2_FB1
+    I_mini[FB1,PYR1]=-noise_FB1
+    I_mini[FB1,PYR2]=-noise_FB1
+    I_mini[FF1,PYR1]=-noise_FF1
+    I_mini[FF1,PYR2]=-noise_FF1
+    return I_mini
 
 # ============================================================
 # DISABLE CONNECTIONS FOR DIFFERENT TEST TYPES
@@ -9671,8 +9666,10 @@ def getnoise(noise,i):
 
 if ttype==0:
     W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
 if ttype==1:
     W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
 if ttype==2:
     W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
 
@@ -9686,12 +9683,17 @@ V_last=None
 I_last=None
 spike_peak_last=None
 Vth_last=None
+Iconn_last=None
+I_OB_last=None
+I_mini_last=None
+I_self_last=None
 
 # ============================================================
 # SIMULATION
 # ============================================================
 
 for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+
     rng=np.random.default_rng()
     PYR1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
     PYR2_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
@@ -9706,25 +9708,17 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
     pending_AP=[]
     ndsv=M.copy()
     next_refill=np.full((N,N),np.inf)
-    next_mini=np.full((N,N),np.inf)
-
-    for pre in range(N):
-        for post in range(N):
-            if W[pre,post]==0:
-                continue
-            if mini_rate[pre,post]>0:
-                wait=np.random.exponential(1/mini_rate[pre,post])
-                next_mini[pre,post]=wait
 
     if run==navgs-1:
         spike_peak_last=np.full((N,len(time)),np.nan)
         I_last=np.zeros((N,len(time)))
         Iconn_last=np.zeros((N,N,len(time)))
         I_OB_last=np.zeros((N,len(time)))
-        I_noise_last=np.zeros((N,len(time)))
+        I_mini_last=np.zeros((N,N,len(time)))
+        I_self_last=np.zeros((N,len(time)))
 
     V[:,0]=V0
-    vth[:,0]=vt
+    vth[:,0]=V_threshold
     rfon=np.zeros(N)
     rftimer=np.ones(N)*np.inf
 
@@ -9742,6 +9736,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
     # ========================================================
 
     for t in range(1,len(time)):
+
         current_time=t*dt
 
         # ====================================================
@@ -9750,6 +9745,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
         if pending_AP:
             remaining_AP=[]
+
             for start_time,pre,target,B in pending_AP:
                 if current_time>=start_time:
                     if tau_rise[pre,target]>0 and tau_fall[pre,target]>0:
@@ -9761,6 +9757,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                         Ispike[pre,target]+=AP_amplitude[pre,target]*B
                 else:
                     remaining_AP.append((start_time,pre,target,B))
+
             pending_AP=remaining_AP
 
         # ====================================================
@@ -9779,34 +9776,6 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                         next_refill[pre,post]=current_time+wait
                     else:
                         next_refill[pre,post]=np.inf
-
-        # ====================================================
-        # SPONTANEOUS MINI EVENTS
-        # ====================================================
-
-        for pre in range(N):
-            for post in range(N):
-                if W[pre,post]==0:
-                    continue
-                if current_time>=next_mini[pre,post]:
-                    if ndsv[pre,post]>0:
-                        ndsv[pre,post]-=1
-                        if tau_rise[pre,post]>0 and tau_fall[pre,post]>0:
-                            t_peak=(tau_rise[pre,post]*tau_fall[pre,post]/(tau_fall[pre,post]-tau_rise[pre,post]))*np.log(tau_fall[pre,post]/tau_rise[pre,post])
-                            norm=np.exp(-t_peak/tau_fall[pre,post])-np.exp(-t_peak/tau_rise[pre,post])
-                            I_decay[pre,post]+=mini_amplitude[pre,post]/norm
-                            I_rise[pre,post]+=mini_amplitude[pre,post]/norm
-                        else:
-                            Ispike[pre,post]+=mini_amplitude[pre,post]
-                        if ndsv[pre,post]<M[pre,post]:
-                            rate=k[pre]*(M[pre,post]-ndsv[pre,post])
-                            wait=np.random.exponential(1/rate)
-                            next_refill[pre,post]=current_time+wait
-                    if mini_rate[pre,post]>0:
-                        wait=np.random.exponential(1/mini_rate[pre,post])
-                        next_mini[pre,post]=current_time+wait
-                    else:
-                        next_mini[pre,post]=np.inf
 
         # ====================================================
         # DECAY SYNAPTIC CURRENTS
@@ -9831,13 +9800,32 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         I_OB_FF2_t=I_OB_FF2[t]
 
         # ====================================================
+        # GAUSSIAN MINI CURRENTS
+        # ====================================================
+
+        I_mini=get_mini_currents()
+
+        # ====================================================
+        # SELF NOISE
+        # ====================================================
+
+        I_self_noise=np.zeros(N)
+
+        I_self_noise[FB1]=np.random.normal(0,NOISE_FB1_SELF)
+        I_self_noise[FF1]=np.random.normal(0,NOISE_FF1_SELF)
+
+        # ====================================================
         # STORE CURRENTS
         # ====================================================
 
         if run==navgs-1:
             Iconn_last[:,:,t]=Ispike
+            I_mini_last[:,:,t]=I_mini
+            I_self_last[:,t]=I_self_noise
+
             for post in range(N):
-                I_last[post,t]=np.sum(Ispike[:,post])
+                I_last[post,t]=np.sum(Ispike[:,post]+I_mini[:,post])+I_self_noise[post]
+
             I_OB_last[PYR1,t]=I_OB_PYR1_t
             I_OB_last[PYR2,t]=I_OB_PYR2_t
             I_OB_last[FF1,t]=I_OB_FF1_t
@@ -9848,8 +9836,8 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         # ====================================================
 
         for post in range(N):
-            Inoise=getnoise(noise,post)
-            Isyn=np.sum(Ispike[:,post])
+
+            Isyn=np.sum(Ispike[:,post]+I_mini[:,post])
 
             if post==PYR1:
                 I_OB=I_OB_PYR1_t
@@ -9862,20 +9850,16 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
             else:
                 I_OB=0.0
 
-            I=Isyn+I_OB+Inoise
-
-            if run==navgs-1:
-                I_noise_last[post,t]=Inoise
-
+            I=Isyn+I_OB+I_self_noise[post]
             i_ion=gL[post]*(V[post,t-1]-V0[post])
             dVdt=(I-i_ion)/C_m[post]
             V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
-
-            dvthdt=-(vth[post,t-1]-vt[post])/tauvth[post]
+            dvthdt=-(vth[post,t-1]-V_threshold[post])/tau_vth[post]
             vth[post,t]=vth[post,t-1]+dt*dvthdt
 
             if rftimer[post]!=np.inf:
                 rftimer[post]-=dt
+
             if rftimer[post]<=0:
                 rftimer[post]=np.inf
                 rfon[post]=False
@@ -9885,6 +9869,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
             # =================================================
 
             if V[post,t]>vth[post,t]:
+
                 spikes[post,t]=1
 
                 if run==navgs-1:
@@ -9917,7 +9902,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                 # ADAPTIVE THRESHOLD
                 # =============================================
 
-                vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/vt[post])+alpha[post,2]*(V[post,t]/vt[post])**2
+                vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/V_threshold[post])+alpha[post,2]*(V[post,t]/V_threshold[post])**2
                 V[post,t]=vr[post]
 
     # ========================================================
@@ -9934,6 +9919,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
 
     for i in range(N):
         spike_times=time[spikes[i]==1]
+
         if len(spike_times)>1:
             isi=np.diff(spike_times)
             rate_acc[run,i]=1/np.mean(isi)
@@ -9966,15 +9952,12 @@ fs=15
 plot_neurons=[PYR1,PYR2,FB1,FF1]
 
 if ptype==0:
+
     fig,ax=plt.subplots(4,2,figsize=(16,10),sharex=True)
 
     for j,i in enumerate(plot_neurons):
+
         rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
-
-        # ====================================================
-        # MEMBRANE POTENTIAL
-        # ====================================================
-
         ax[j,0].plot(time,V_last[i]*1000,label="V")
         mask=~np.isnan(spike_peak_last[i])
         ax[j,0].scatter(time[mask],spike_peak_last[i,mask]*1000,s=60,color="black",zorder=5,label="Spike")
@@ -9990,20 +9973,17 @@ if ptype==0:
         ax[j,0].legend(fontsize=fs-2,loc="upper right")
         ax[j,0].tick_params(axis="both",labelsize=fs)
 
-        # ====================================================
-        # INCOMING CURRENTS
-        # ====================================================
-
         connected_inputs=np.where(W[:,i]!=0)[0]
 
         for pre in connected_inputs:
-            ax[j,1].plot(time,Iconn_last[pre,i]*1e12,label=f"{names[pre]}")
+            current_trace=Iconn_last[pre,i]+I_mini_last[pre,i]
+            ax[j,1].plot(time,current_trace*1e12,label=f"{names[pre]}")
+
+        if i in [FB1,FF1]:
+            ax[j,1].plot(time,I_self_last[i]*1e12,label="Gaussian noise")
 
         if i in [PYR1,PYR2,FF1]:
             ax[j,1].plot(time,I_OB_last[i]*1e12,label="OB")
-
-        if i in FB or i in FF:
-            ax[j,1].plot(time,I_noise_last[i]*1e12,label="Gaussian noise")
 
         ax[j,1].set_ylabel("I(t) (pA)",fontsize=fs)
 
@@ -10023,21 +10003,18 @@ if ptype==0:
     plt.show()
 
 elif ptype==1:
+
     n_inputs=[]
 
     for i in plot_neurons:
-        n_inputs.append(len(np.where(W[:,i]!=0)[0])+(1 if i in [PYR1,PYR2,FF1] else 0)+(1 if i in FB or i in FF else 0))
+        n_inputs.append(len(np.where(W[:,i]!=0)[0])+(1 if i in [PYR1,PYR2,FF1] else 0))
 
     nrows=max(1+np.max(n_inputs),2)
     fig,ax=plt.subplots(nrows,4,figsize=(20,4*nrows),sharex=True,squeeze=False)
 
     for j,i in enumerate(plot_neurons):
+
         rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
-
-        # ====================================================
-        # MEMBRANE POTENTIAL
-        # ====================================================
-
         vax=ax[0,j]
         vax.plot(time,V_last[i]*1000,label="V")
         mask=~np.isnan(spike_peak_last[i])
@@ -10054,18 +10031,24 @@ elif ptype==1:
         vax.legend(fontsize=fs-2,loc="upper right")
         vax.tick_params(axis="both",labelsize=fs)
 
-        # ====================================================
-        # INCOMING SYNAPTIC CURRENTS
-        # ====================================================
-
         row=1
         connected_inputs=np.where(W[:,i]!=0)[0]
 
         for pre in connected_inputs:
             iax=ax[row,j]
-            iax.plot(time,Iconn_last[pre,i]*1e12,label=f"{names[pre]}")
+            current_trace=Iconn_last[pre,i]+I_mini_last[pre,i]
+            iax.plot(time,current_trace*1e12,label=f"{names[pre]}")
             iax.set_ylabel("I (pA)",fontsize=fs)
             iax.set_title(names[pre]+" to "+names[i],fontsize=fs)
+            iax.legend(fontsize=fs-2,loc="upper right")
+            iax.tick_params(axis="both",labelsize=fs-2)
+            row+=1
+
+        if i in [FB1,FF1]:
+            iax=ax[row,j]
+            iax.plot(time,I_self_last[i]*1e12,label="Gaussian noise")
+            iax.set_ylabel("I (pA)",fontsize=fs)
+            iax.set_title("Gaussian noise to "+names[i],fontsize=fs)
             iax.legend(fontsize=fs-2,loc="upper right")
             iax.tick_params(axis="both",labelsize=fs-2)
             row+=1
@@ -10079,19 +10062,6 @@ elif ptype==1:
             iax.tick_params(axis="both",labelsize=fs)
             row+=1
 
-        if i in FB or i in FF:
-            iax=ax[row,j]
-            iax.plot(time,I_noise_last[i]*1e12,label="Gaussian noise")
-            iax.set_ylabel("I (pA)",fontsize=fs)
-            iax.set_title("Inhibitory Gaussian noise to "+names[i],fontsize=fs)
-            iax.legend(fontsize=fs-2,loc="upper right")
-            iax.tick_params(axis="both",labelsize=fs)
-            row+=1
-
-        # ====================================================
-        # HIDE UNUSED SUBPLOTS
-        # ====================================================
-
         for r in range(row,nrows):
             ax[r,j].axis("off")
 
@@ -10099,15 +10069,3 @@ elif ptype==1:
 
     plt.tight_layout()
     plt.show()
-#%%
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-
-# file = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV\VT NOISE\v_t_trace_trial_1.csv'
-file=r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv\v-t noise\v_t_trace_trial_5.csv'
-x = pd.read_csv(file)
-
-x=np.array(x)
-plt.plot(x[:,0],x[:,1])
-plt.show()
