@@ -10945,9 +10945,9 @@ RISE_FF_PYR=2e-3
 FALL_FF_PYR=10e-3
 
 N_OB=21
-A_OB_PYR=38.6e-12
-A_OB_FF=30e-12
-A_OB_FF2=43.1e-12
+A_OB_PYR=38.6e-12*0
+A_OB_FF=30e-12*0
+A_OB_FF2=43.1e-12*0
 
 tau_OB_rise=0.2e-3
 tau_OB_decay=1e-3
@@ -10969,16 +10969,16 @@ tdelay_FF_PYR=2e-3
 # GAUSSIAN MINI STANDARD DEVIATIONS
 # ============================================================
 
-NOISE_PYR_PYR_POS=100e-12
+NOISE_PYR_PYR_POS=200e-12
 NOISE_OB_PYR=NOISE_PYR_PYR_POS/2
 
 NOISE_PYR_FB_POS=1e-12
 
-NOISE_FB_PYR_NEG=100e-12
+NOISE_FB_PYR_NEG=NOISE_PYR_PYR_POS#100e-12
 NOISE_FF_PYR_NEG=NOISE_FB_PYR_NEG/2
 
-NOISE_FB1_SELF=1000e-12
-NOISE_FF1_SELF=1000e-12
+NOISE_FB1_SELF=300e-12
+NOISE_FF1_SELF=300e-12
 
 # ============================================================
 # SIMULATION PARAMETERS
@@ -11465,15 +11465,6 @@ fs=15
 plot_alpha=1
 plot_neurons=[PYR1,PYR2,FB1,FF1]
 
-trialnum=2
-file=r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV\VT NOISE\v_t_trace_trial_{}.csv'.format(trialnum)
-csv_data=pd.read_csv(file).to_numpy()
-csv_time=np.linspace(time[0],time[-1],len(csv_data))
-
-ff_file=r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv\v-t noise\v_t_trace_trial_{}.csv'.format(trialnum)
-ff_csv_data=pd.read_csv(ff_file).to_numpy()
-ff_csv_time=np.linspace(time[0],time[-1],len(ff_csv_data))
-
 if ptype==0:
 
     current_data=[]
@@ -11507,12 +11498,8 @@ if ptype==0:
 
         rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
         ax[j,0].plot(time,V_last[i]*1000,label="V")
-
-        if i==FB1:
-            ax[j,0].plot(csv_time,csv_data[:,1]-10,alpha=0.3,label="Feedback VT Noise CSV")
-
-        if i==FF1:
-            ax[j,0].plot(ff_csv_time,ff_csv_data[:,1]-10,alpha=0.3,label="Feedforward VT Noise CSV")
+        ax[j,0].axhline(vr[i]*1000+3,color="red",linestyle="--",alpha=0.7)
+        ax[j,0].axhline(vr[i]*1000-3,color="red",linestyle="--",alpha=0.7)
 
         mask=~np.isnan(spike_peak_last[i])
         ax[j,0].scatter(time[mask],spike_peak_last[i,mask]*1000,s=60,color="black",zorder=5,label="Spike")
@@ -11558,12 +11545,8 @@ elif ptype==1:
         rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
         vax=ax[0,j]
         vax.plot(time,V_last[i]*1000,label="V")
-
-        if i==FB1:
-            vax.plot(csv_time,csv_data[:,1]-10,alpha=0.3,label="Feedback VT Noise CSV")
-
-        if i==FF1:
-            vax.plot(ff_csv_time,ff_csv_data[:,1]-10,alpha=0.3,label="Feedforward VT Noise CSV")
+        vax.axhline(vr[i]*1000+3,color="red",linestyle="--",alpha=0.7)
+        vax.axhline(vr[i]*1000-3,color="red",linestyle="--",alpha=0.7)
 
         mask=~np.isnan(spike_peak_last[i])
         vax.scatter(time[mask],spike_peak_last[i,mask]*1000,s=60,color="black",zorder=5,label="Spike")
