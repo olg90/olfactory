@@ -825,7 +825,7 @@ rf = 1e-3  # refractory period
 V0 = [-78e-3, -78e-3, -78e-3]  # reverse potential
 C_m = [300e-12, 250e-12, 650e-12] # capacitance
 vr = [-78e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
-gL = [1/(50e6), 1/(50.29e6), 1/(120e6)] # 15e-9  # leak conductance
+gL = [1/(79.843e6), 1/(50.29e6), 1/(93.36e6)] # 15e-9  # leak conductance
 vt = [-77e-3, -62e-3, -70e-3]  # threshold base level
 tauvth = [7e-3, 1e-3, 1e-3] # threshold time constant
 alpha = [[75e-3, 0e-3, 0e-3], 
@@ -11808,16 +11808,18 @@ rf = 1e-3  # refractory period
 #          [1e-3, 1e-3, 1e-3]]
 # =============================================================================
 
-# testing 2
+
 V0 = [-74e-3, -78e-3, -78e-3]  # reverse potential
-C_m = [100e-12, 250e-12, 650e-12] # capacitance
 vr = [-74e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
-gL = [1/(110e6), 1/(50.29e6), 1/(120e6)] # 15e-9  # leak conductance
-vt = [-71e-3, -62e-3, -70e-3]  # threshold base level
-tauvth = [7.2e-3, 1e-3, 1e-3] # threshold time constant
-alpha = [[150e-3, 20e-3, 50e-3],
-         [1e-3, 1e-3, 1e-3],
+gL = [1/(79.843e6), 1/(50.29e6), 1/(93.36e6)] # 15e-9  # leak conductance
+vt = [-71.5e-3, -62e-3, -70e-3]  # threshold base level
+C_m = [100e-12, 250e-12, 650e-12] # capacitance
+tauvth = [5.8e-3, 1e-3, 1e-3] # threshold time constant
+alpha = [[220e-3, 50e-3, 50e-3], 
+         [1e-3, 1e-3, 1e-3], 
          [1e-3, 1e-3, 1e-3]]
+
+
 
 # =============================================================================
 # # sim test
@@ -11860,7 +11862,310 @@ for i in range(3):
         plt.title('\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, tauvth={},alpha={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype], tauvth[0], alpha[dirtype][0]))
 plt.show()
 
+#%% 9 - three tests calibrate
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
 
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+def vthfun(v, v1, vt, aval):
+    if v <= v1:
+        return vt
+    else:
+        return vt + aval[0]*(v1-v)
+# @jit(nopython=True)
+
+def sima(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m, alpha, tauvth):
+
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+    vth=np.zeros_like(V)
+    apind=[]
+
+    # Set initial conditions
+    V[0] = Vinit
+    vth[0]=vt
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        dvthdt = -(vth[i-1]-vt)/tauvth
+        vth[i] = vth[i-1] + dvthdt * dt 
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vth[i]:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+                apind.append(i)
+            rfon = True
+            rftimer = rf
+
+            vth[i]+=alpha[0]+alpha[1]*(V[i]/vt)+alpha[2]*(V[i]/vt)**2
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0  # or np.nan if you want to flag it
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout, vth, aplist, apind
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)]=A
+    return Iext
+
+def generate_spike_train(foutlen, spike_ind, template):
+    # blank array
+    out = np.zeros(foutlen)
+
+    Ltemp = len(template)
+
+    for pos in spike_ind:
+        end = pos + Ltemp
+        if end > foutlen:
+            end = foutlen
+
+        # add template at spike
+        out[pos:end] += template[:end - pos]
+
+    return out
+
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    # SynKernel = A * ( exp(-(x)/tauDecay) - exp(-(x)/tauRise) )
+    t = np.arange(0, tmax, dt)
+    A = scale_I / (-(tr/td)**(td/(td-tr)) + (tr/td)**(tr/(td-tr)))
+    template = A * (np.exp(-t / td) - np.exp(-t / tr))
+    return t, template
+
+
+def compute_fout_heatmap(dir1, dir2,
+                         amplitudes,
+                         strengths,
+                         tmax, dt, rf,
+                         V0, vr, gL, vt, C_m, alpha, tauvth,
+                         tr, td, ttemp):
+
+    fout_map = np.zeros((len(amplitudes), len(strengths)))
+
+    for i, A in enumerate(amplitudes):
+        # input neuron → spikes
+        Iext = geti(tmax, dt, A)
+        res_in = sima(V0[dir1], len(Iext), Iext, dt,
+                      vr[dir1], rf, gL[dir1], vt[dir1],
+                      C_m[dir1], alpha[dir1], tauvth[dir1])
+
+        spike_ind = res_in[4]
+
+        for j, s in enumerate(strengths):
+            print(i, len(amplitudes),j,len(strengths))
+            # synaptic kernel with strength s
+            _, temp = make_normalized_template(td, tr, ttemp, dt, s)
+
+            # spike train → current
+            syn_current = generate_spike_train(len(res_in[0]), spike_ind, temp)
+
+            # output neuron
+            res_out = sima(V0[dir2], len(syn_current), syn_current, dt,
+                           vr[dir2], rf, gL[dir2], vt[dir2],
+                           C_m[dir2], alpha[dir2], tauvth[dir2])
+
+            fout_map[i, j] = res_out[1]
+
+    return {
+        "fout_map": fout_map,
+        "amplitudes": amplitudes,
+        "strengths": strengths
+    }
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir=r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files=['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles=['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles=['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames=['Som', 'Feedback', 'Feedforward']
+ftype='F-I.csv'
+dirs = [somdir, fbdir, ffdir]
+
+dirtype=0 # <-------------------- 0-som, 1-FB, 2-FF
+dnames=['som', 'feedback', 'feedforward']
+
+dlist=[]
+for dirtype in range(3):
+    data=pd.read_csv(dirs[dirtype]+'\{}'.format(ftype))
+    data=np.array(data.iloc[:, :2])
+    data[:,0]*=1e-9
+    dlist.append(data)
+
+tmax = 1.5  # simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+V0 = [-74e-3, -78e-3, -78e-3]  # reverse potential
+vr = [-74e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(79.843e6), 1/(50.29e6), 1/(93.36e6)] # 15e-9  # leak conductance
+vt = [-71.5e-3, -62e-3, -70e-3]  # threshold base level
+C_m = [100e-12, 250e-12, 650e-12] # capacitance
+tauvth = [5.8e-3, 1e-3, 1e-3] # threshold time constant
+alpha = [[220e-3, 50e-3, 50e-3], 
+         [1e-3, 1e-3, 1e-3], 
+         [1e-3, 1e-3, 1e-3]]
+
+tr=1e-3
+td=10e-3
+ttemp=1
+tmax=10
+dt=1e-4
+strength = 1e-9
+f=100
+t_temp, temp= make_normalized_template(td, tr, ttemp, dt, strength)
+
+dir1=0
+dir2=0
+
+# =============================================================================
+# amplitudes = np.array(dlist[dir1])[:,0]  # or whichever you want
+# strengths = np.linspace(1e-9, 10e-9, 20)
+# 
+# res = compute_fout_heatmap(
+#     dir1=dir1, dir2=dir2,
+#     amplitudes=amplitudes,
+#     strengths=strengths,
+#     tmax=tmax, dt=dt, rf=rf,
+#     V0=V0, vr=vr, gL=gL, vt=vt, C_m=C_m,
+#     alpha=alpha, tauvth=tauvth,
+#     tr=tr, td=td, ttemp=ttemp
+# )
+# 
+# # plot
+# plt.figure()
+# plt.imshow(res["fout_map"], aspect='auto', origin='lower',
+#            extent=[res["strengths"][0]*1e9, res["strengths"][-1]*1e9,
+#                    res["amplitudes"][0]*1e9, res["amplitudes"][-1]*1e9])
+# 
+# plt.colorbar(label='fout (Hz)')
+# plt.xlabel('Strength (nA)')
+# plt.ylabel('Amplitude (nA)')
+# plt.title(r'${} \rightarrow {}$'.format(dnames[dir1], dnames[dir2]))
+# plt.show()
+# =============================================================================
+
+# =============================================================================
+# # sim test
+# res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+# plt.plot(res[0])
+# plt.plot(res[2])
+# # plt.ylim([-0.08, -0.065])
+# # plt.xlim([0, 3000])
+# plt.show()
+# #%%
+# =============================================================================
+
+foutslist=[]
+for i, dirtype in enumerate(range(3)):
+    alist=np.array(dlist[i])[:,0] # amplitude list input
+    fouts=[]
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+        res=sima(V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype], alpha[dirtype], tauvth[dirtype])
+        fouts.append(res[1])
+    foutslist.append(fouts)
+
+for i in range(3):
+    plt.subplot(1,3,i+1)
+    alist=dlist[i][:,0]
+    plt.plot(alist*1e9, dlist[i][:, 1], label='experimental', marker='o')
+    plt.plot(alist*1e9, foutslist[i], label='simulation', marker='o', alpha=0.6)
+    # =============================================================================
+    # plt.plot(alist, data[:, 1], label='experimental', 
+    #             marker='o')
+    # plt.plot(alist, fouts, label='simulation', 
+    #          linewidth=1, alpha=0.8, marker='o')
+    # =============================================================================
+
+    plt.ylabel('Output frequency')
+    plt.xlabel('Input current amplitude (nA)')
+    plt.plot([],[],' ', label='{}'.format(dirnames[i]))
+    plt.legend()
+    if i == 1:
+        plt.title('\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, tauvth={},alpha={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype], tauvth[0], alpha[dirtype][0]))
+plt.show()
 #%% 9 - All membrane potentials and currents - sampled from time data
 
 import numpy as np
@@ -11899,7 +12204,8 @@ for i in FB:
     C_m[i]=250e-12
     vr[i]=-78e-3
     gL[i]=1/(50.29e6)
-    V_threshold[i]=-62e-3
+    # V_threshold[i]=-62e-3
+    V_threshold[i]=-45e-3
     tau_vth[i]=1e-3
     alpha[i]=[1e-3,1e-3,1e-3]
 
@@ -11947,11 +12253,11 @@ W[FF2,FF1]=0
 # SYNAPTIC PARAMETERS
 # ============================================================
 
-AP_PYR_PYR=500e-12
+AP_PYR_PYR=500e-12 # 500e-12, changed for tests
 RISE_PYR_PYR=0.2e-3
 FALL_PYR_PYR=20e-3
 
-AP_PYR_FB=10e-12
+AP_PYR_FB=117e-12 # this should change
 RISE_PYR_FB=0.2e-3
 FALL_PYR_FB=2.63e-3
 
@@ -11963,10 +12269,14 @@ AP_FF_PYR=-60e-12
 RISE_FF_PYR=2e-3
 FALL_FF_PYR=10e-3
 
+# Firing rates:
+# pyr=2.6,fb=7,ff=9
+
 N_OB=21
-A_OB_PYR=38.6e-12*0
-A_OB_FF=30e-12*0
-A_OB_FF2=43.1e-12*0
+A_OB_PYR=29e-12 # 38.6+-9.6 = 29 to 48.2
+A_OB_FF=45e-12 # 43.1+-12 = 31.1 to 55.1
+
+A_OB_FF2=43.1e-12*0 # always 0 for this reduced model
 
 tau_OB_rise=0.2e-3
 tau_OB_decay=1e-3
@@ -11988,15 +12298,15 @@ tdelay_FF_PYR=2e-3
 # GAUSSIAN MINI STANDARD DEVIATIONS
 # ============================================================
 
-NOISE_PYR_PYR_POS=140e-12
+NOISE_PYR_PYR_POS=120e-12
 NOISE_OB_PYR=NOISE_PYR_PYR_POS/2
 
-NOISE_PYR_FB_POS=1e-12
+NOISE_PYR_FB_POS=NOISE_PYR_PYR_POS/2*0
 
-NOISE_FB_PYR_NEG=NOISE_PYR_PYR_POS#100e-12
+NOISE_FB_PYR_NEG=NOISE_PYR_PYR_POS
 NOISE_FF_PYR_NEG=NOISE_FB_PYR_NEG/2
 
-NOISE_FB1_SELF=300e-12
+NOISE_FB1_SELF=NOISE_PYR_PYR_POS
 NOISE_FF1_SELF=300e-12
 
 # ============================================================
@@ -12006,12 +12316,12 @@ NOISE_FF1_SELF=300e-12
 kPYR1=1
 kFB1=1
 kFF1=1
-prAPPYR=0.9
-prAPFB=0.5
+prAPPYR=0.5
+prAPFB=0.7
 prAPFF=0.5
-MPYR=5
-MFB=5
-MFF=5
+MPYR=3*5 # number of docking * number synapse
+MFB=5*5
+MFF=5*5
 kPYR2=kPYR1
 kFB2=kFB1
 kFF2=kFF1
@@ -12340,6 +12650,7 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
         I_self_noise=np.zeros(N)
 
         I_self_noise[FB1]=np.random.normal(0,NOISE_FB1_SELF)
+        # I_self_noise[FB1]=-abs(np.random.normal(0,NOISE_FB1_SELF))
         I_self_noise[FF1]=np.random.normal(0,NOISE_FF1_SELF)
 
         # ====================================================
@@ -12493,19 +12804,20 @@ if ptype==0:
         currents=[]
 
         if i in PYR:
-            currents.append(("OB-PYR Gaussian noise",I_OB_noise_last[i]))
+            currents.append(("OB-PYR Gaussian noise",I_OB_noise_last[i],None))
 
         connected_inputs=np.where(W[:,i]!=0)[0]
 
         for pre in connected_inputs:
-            current_trace=Iconn_last[pre,i]+I_mini_last[pre,i]
-            currents.append((f"{names[pre]}",current_trace))
+            noise_trace=I_mini_last[pre,i]
+            AP_trace=Iconn_last[pre,i]
+            currents.append((f"{names[pre]} to {names[i]}",noise_trace,AP_trace))
 
         if i in [FB1,FF1]:
-            currents.append(("Gaussian noise",I_self_last[i]))
+            currents.append(("Gaussian noise",I_self_last[i],None))
 
         if i in [PYR1,PYR2,FF1]:
-            currents.append(("OB",I_OB_last[i]))
+            currents.append(("OB",I_OB_last[i],None))
 
         current_data.append(currents)
 
@@ -12515,7 +12827,8 @@ if ptype==0:
 
     for j,i in enumerate(plot_neurons):
 
-        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD= {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+
         ax[j,0].plot(time,V_last[i]*1000,label="V")
         ax[j,0].axhline(V0[i]*1000+3,color="red",linestyle="--",alpha=0.7)
         ax[j,0].axhline(V0[i]*1000-3,color="red",linestyle="--",alpha=0.7)
@@ -12534,12 +12847,28 @@ if ptype==0:
         ax[j,0].legend(fontsize=fs-2,loc="upper right")
         ax[j,0].tick_params(axis="both",labelsize=fs)
 
-        for col,(label,current_trace) in enumerate(current_data[j],start=1):
-            ax[j,col].plot(time,current_trace*1e12,alpha=plot_alpha)
-            if col==1:
-                ax[j,col].set_ylabel("I(t) (pA)",fontsize=fs)
-            ax[j,col].set_title(label,fontsize=fs)
-            ax[j,col].tick_params(axis="both",labelsize=fs)
+        for col,(label,noise_trace,AP_trace) in enumerate(current_data[j],start=1):
+
+            iax=ax[j,col]
+            iax.plot(time,noise_trace*1e12,color="tab:blue",alpha=plot_alpha,label="Noise")
+            iax.set_ylabel("Noise current (pA)",fontsize=fs,color="tab:blue")
+            iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs)
+
+            if AP_trace is not None:
+                apax=iax.twinx()
+                apax.plot(time,AP_trace*1e12,color="tab:orange",alpha=plot_alpha,label="AP current")
+                apax.set_ylabel("AP current (pA)",fontsize=fs,color="tab:orange")
+                apax.tick_params(axis="y",labelcolor="tab:orange",labelsize=fs)
+
+                lines1,labels1=iax.get_legend_handles_labels()
+                lines2,labels2=apax.get_legend_handles_labels()
+                iax.legend(lines1+lines2,labels1+labels2,fontsize=fs-2,loc="upper right")
+
+            else:
+                iax.legend(fontsize=fs-2,loc="upper right")
+
+            iax.set_title(label,fontsize=fs)
+            iax.tick_params(axis="x",labelsize=fs)
 
         for col in range(len(current_data[j])+1,n+1):
             ax[j,col].axis("off")
@@ -12561,7 +12890,8 @@ elif ptype==1:
 
     for j,i in enumerate(plot_neurons):
 
-        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD_rates = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+
         vax=ax[0,j]
         vax.plot(time,V_last[i]*1000,label="V")
         vax.axhline(V0[i]*1000+3,color="red",linestyle="--",alpha=0.7)
@@ -12585,29 +12915,42 @@ elif ptype==1:
 
         if i in PYR:
             iax=ax[row,j]
-            iax.plot(time,I_OB_noise_last[i]*1e12,alpha=plot_alpha)
-            iax.set_ylabel("I (pA)",fontsize=fs)
+            iax.plot(time,I_OB_noise_last[i]*1e12,color="tab:blue",alpha=plot_alpha)
+            iax.set_ylabel("I (pA)",fontsize=fs,color="tab:blue")
+            iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
             iax.set_title("OB-PYR Gaussian noise to "+names[i],fontsize=fs)
-            iax.tick_params(axis="both",labelsize=fs-2)
             row+=1
 
         connected_inputs=np.where(W[:,i]!=0)[0]
 
         for pre in connected_inputs:
+
             iax=ax[row,j]
-            current_trace=Iconn_last[pre,i]+I_mini_last[pre,i]
-            iax.plot(time,current_trace*1e12,alpha=plot_alpha)
-            iax.set_ylabel("I (pA)",fontsize=fs)
+            noise_trace=I_mini_last[pre,i]
+            AP_trace=Iconn_last[pre,i]
+
+            iax.plot(time,noise_trace*1e12,color="tab:blue",alpha=plot_alpha,label="Noise")
+            iax.set_ylabel("Noise current (pA)",fontsize=fs,color="tab:blue")
+            iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
+
+            apax=iax.twinx()
+            apax.plot(time,AP_trace*1e12,color="tab:orange",alpha=plot_alpha,label="AP current")
+            apax.set_ylabel("AP current (pA)",fontsize=fs,color="tab:orange")
+            apax.tick_params(axis="y",labelcolor="tab:orange",labelsize=fs-2)
+
+            lines1,labels1=iax.get_legend_handles_labels()
+            lines2,labels2=apax.get_legend_handles_labels()
+            iax.legend(lines1+lines2,labels1+labels2,fontsize=fs-2,loc="upper right")
+
             iax.set_title(names[pre]+" to "+names[i],fontsize=fs)
-            iax.tick_params(axis="both",labelsize=fs-2)
             row+=1
 
         if i in [FB1,FF1]:
             iax=ax[row,j]
-            iax.plot(time,I_self_last[i]*1e12,alpha=plot_alpha)
-            iax.set_ylabel("I (pA)",fontsize=fs)
+            iax.plot(time,I_self_last[i]*1e12,color="tab:blue",alpha=plot_alpha)
+            iax.set_ylabel("I (pA)",fontsize=fs,color="tab:blue")
+            iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
             iax.set_title("Gaussian noise to "+names[i],fontsize=fs)
-            iax.tick_params(axis="both",labelsize=fs-2)
             row+=1
 
         if i in [PYR1,PYR2,FF1]:
