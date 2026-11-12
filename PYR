@@ -12277,7 +12277,7 @@ fbfiles=['.DS_Store','F-I.csv','firing_frequencies.csv','VT csv','VT NOISE']
 fffiles=['.DS_Store','F-I.csv','firing_frequencies.csv','v-t','v-t noise']
 dirnames=['Som','Feedback','Feedforward']
 
-dirtype=1 # 0-som, 1-FB, 2-FF
+dirtype=2 # 0-som, 1-FB, 2-FF
 ftype='F-I.csv'
 
 dirs=[somdir,fbdir,ffdir]
@@ -12300,14 +12300,13 @@ rf=1e-3
 # gL=[1/(79.843e6),1/(50.29e6),1/(93.36e6)]
 # vt=[-71.5e-3,-67e-3,-72e-3]
 # C_m=[200e-12,250e-12,650e-12]
-# 
-# Vi=[-69.5e-3,-72e-3,-73e-3] # Voltage where threshold begins increasing
-# aT=[0.85,0.72,0.1]         # Slope of voltage-dependent threshold increase
-# tau_theta1=[2e-3,15.9e-3,15e-3] # Time constant of voltage-dependent threshold
-# alpha=[30e-3,5e-3,11e-3]        # Spike-triggered threshold increment
-# tau_theta2=[8e-3,4.1e-3,4e-3]   # Decay time constant of spike-triggered threshold
+#
+# Vi=[-69.5e-3,-72e-3,-73e-3]
+# aT=[0.85,0.72,0.1]
+# tau_theta1=[2e-3,15.9e-3,15e-3]
+# alpha=[30e-3,5e-3,11e-3]
+# tau_theta2=[8e-3,4.1e-3,4e-3]
 # =============================================================================
-
 
 V0=[-74e-3,-78e-3,-78e-3]
 vr=[-74e-3,-78e-3,-78e-3]
@@ -12315,11 +12314,11 @@ gL=[1/(79.843e6),1/(50.29e6),1/(93.36e6)]
 vt=[-71.5e-3,-67e-3,-73e-3]
 C_m=[200e-12,250e-12,740e-12]
 
-Vi=[-69.5e-3,-72e-3,-77e-3] # Voltage where threshold begins increasing
-aT=[0.85,0.72,0.2]         # Slope of voltage-dependent threshold increase
-tau_theta1=[2e-3,15.9e-3,1e-3] # Time constant of voltage-dependent threshold
-alpha=[30e-3,5e-3,3.5e-3]        # Spike-triggered threshold increment
-tau_theta2=[8e-3,4.1e-3,5.5e-3]   # Decay time constant of spike-triggered threshold
+Vi=[-69.5e-3,-72e-3,-77e-3]
+aT=[0.85,0.72,0.2]
+tau_theta1=[2e-3,15.9e-3,1e-3]
+alpha=[30e-3,5e-3,3.5e-3]
+tau_theta2=[8e-3,4.1e-3,5.5e-3]
 
 
 # ============================================================
@@ -12352,6 +12351,7 @@ for a in alist:
 
     fouts.append(res[1])
 
+
 # ============================================================
 # SINGLE SIMULATION: MEMBRANE POTENTIAL AND THRESHOLD
 # ============================================================
@@ -12367,35 +12367,347 @@ V_single,fout_single,vth_single=sima(
 
 time=np.arange(len(V_single))*dt
 
+
 # ============================================================
 # COMBINED PLOT
 # ============================================================
 
-fig,(ax1,ax2)=plt.subplots(1,2,figsize=(14,5))
+fig,(ax1,ax2)=plt.subplots(1,2,figsize=(16,6))
+
+# Membrane potential parameters only
+parameter_text=(
+    f"$V_0$ = {V0[dirtype]*1e3:.2f} mV\n"
+    f"$v_r$ = {vr[dirtype]*1e3:.2f} mV\n"
+    f"$g_L$ = {gL[dirtype]*1e9:.4f} nS\n"
+    f"$C_m$ = {C_m[dirtype]*1e12:.2f} pF"
+)
 
 # F-I curve
 ax1.plot(alist*1e9,data[:,1],label='Data',marker='o')
 ax1.plot(alist*1e9,fouts,label='Simulation',marker='o',alpha=0.6)
+ax1.plot([],[],linestyle='none',label=parameter_text)
+
 ax1.set_xlabel('Input current amplitude (nA)')
 ax1.set_ylabel('Output frequency (Hz)')
 ax1.set_title('{}: F-I curve'.format(dirnames[dirtype]))
-ax1.legend()
+ax1.legend(loc='upper left')
 ax1.grid(alpha=0.3)
 
 # Membrane potential and threshold
 ax2.plot(time,V_single*1e3,color='tab:blue',label='Membrane potential')
 ax2.plot(time,vth_single*1e3,color='tab:red',label='Threshold potential')
+ax2.plot([],[],linestyle='none',label=parameter_text)
+
 ax2.set_xlabel('Time (s)')
 ax2.set_ylabel('Potential (mV)')
 ax2.set_title('{}: I = {:.3f} nA, firing rate = {:.2f} Hz'.format(
     dirnames[dirtype],amplitude*1e9,fout_single
 ))
-ax2.legend()
+
+ax2.legend(loc='upper left')
 ax2.grid(alpha=0.3)
 
 plt.tight_layout()
 plt.show()
 
+#%% Threshold adaptation model - increasing current
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+fs=15
+
+def sima(Vinit,tlen,Iext,dt,vr,rf,gL,vt,C_m,alpha,tauvth):
+
+    V=np.zeros(tlen)
+    aplist=np.zeros_like(V)
+    vth=np.zeros_like(V)
+
+    V[0]=Vinit
+    vth[0]=vt
+
+    ratio=0.3
+    rfon=False
+    rftimer=np.inf
+
+    for i in range(1,tlen):
+
+        i_ion=gL*(V[i-1]-Vinit)
+        dVdt=(1/C_m)*(Iext[i-1]-i_ion)
+        V[i]=V[i-1]+dVdt*dt*(1-rfon)
+
+        dvthdt=-(vth[i-1]-vt)/tauvth
+        vth[i]=vth[i-1]+dvthdt*dt
+
+        if rftimer!=np.inf:
+            rftimer-=dt
+
+        if rftimer<=0:
+            rftimer=np.inf
+            rfon=False
+
+        if V[i]>vth[i]:
+            aplist[i]=i*dt if i>int(ratio*tlen) else 0
+            rfon=True
+            rftimer=rf
+
+            vth[i]+=alpha[0]+alpha[1]*(V[i]/vt)+alpha[2]*(V[i]/vt)**2
+            V[i]=vr
+
+    aps=np.where(aplist!=0)[0]*dt
+    fout=0 if len(aps)<2 else 1/np.mean(np.diff(aps))
+
+    return V,fout,vth
+
+
+# ============================================================
+# PARAMETERS
+# ============================================================
+
+dirtype=0
+
+V0=[-74e-3,-78e-3,-78e-3]
+vr=[-74e-3,-78e-3,-78e-3]
+gL=[1/(79.843e6),1/(50.29e6),1/(93.36e6)]
+vt=[-71.5e-3,-62e-3,-70e-3]
+C_m=[100e-12,250e-12,650e-12]
+
+tauvth=[5.8e-3,1e-3,1e-3]
+alpha=[
+    [220e-3,50e-3,50e-3],
+    [1e-3,1e-3,1e-3],
+    [1e-3,1e-3,1e-3]
+]
+
+rf=1e-3
+dt=1e-4
+tmax=5
+
+# ============================================================
+# INCREASING CURRENT
+# ============================================================
+
+t=np.arange(0,tmax,dt)
+Iext=np.linspace(0,1e-9,len(t))
+
+# ============================================================
+# SIMULATION
+# ============================================================
+
+V,fout,vth=sima(
+    V0[dirtype],len(Iext),Iext,dt,
+    vr[dirtype],rf,gL[dirtype],vt[dirtype],
+    C_m[dirtype],alpha[dirtype],tauvth[dirtype]
+)
+
+# ============================================================
+# PLOT
+# ============================================================
+
+fig,(ax1,ax2)=plt.subplots(2,1,figsize=(14,10),sharex=True)
+
+ax1.plot(t,Iext*1e9,color='black',lw=2,label=r'$I_{\mathrm{ext}}$')
+ax1.set_ylabel('Input current (nA)',fontsize=fs)
+ax1.set_title('Increasing input current',fontsize=fs)
+ax1.tick_params(axis='both',labelsize=fs)
+ax1.legend(fontsize=fs)
+ax1.grid(alpha=0.3)
+
+ax2.plot(t,V*1e3,label=r'$V$',color='tab:blue',lw=1.5)
+ax2.plot(t,vth*1e3,label=r'$V_{\mathrm{th}}$',color='tab:red',lw=1.5)
+
+parameter_text=(
+    f"$V_0$ = {V0[dirtype]*1e3:.2f} mV\n"
+    f"$v_r$ = {vr[dirtype]*1e3:.2f} mV\n"
+    f"$g_L$ = {gL[dirtype]*1e9:.4f} nS\n"
+    f"$C_m$ = {C_m[dirtype]*1e12:.2f} pF\n"
+    f"$v_t$ = {vt[dirtype]*1e3:.2f} mV\n"
+    f"$\\tau_{{vth}}$ = {tauvth[dirtype]*1e3:.2f} ms\n"
+    f"$\\alpha_0$ = {alpha[dirtype][0]*1e3:.2f} mV\n"
+    f"$\\alpha_1$ = {alpha[dirtype][1]*1e3:.2f} mV\n"
+    f"$\\alpha_2$ = {alpha[dirtype][2]*1e3:.2f} mV\n"
+    f"$rf$ = {rf*1e3:.2f} ms"
+)
+
+ax2.text(
+    0.98,0.98,parameter_text,
+    transform=ax2.transAxes,
+    fontsize=fs,
+    verticalalignment='top',
+    horizontalalignment='right',
+    bbox=dict(boxstyle='round',facecolor='white',alpha=0.9)
+)
+
+ax2.set_xlabel('Time (s)',fontsize=fs)
+ax2.set_ylabel('Potential (mV)',fontsize=fs)
+ax2.set_title(f'Adaptive threshold model (firing rate = {fout:.2f} Hz)',fontsize=fs)
+ax2.tick_params(axis='both',labelsize=fs)
+ax2.legend(loc='upper left',fontsize=fs,ncol=1)
+ax2.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+#%% Lubejko model - square current pulse
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+fs=15
+
+def theta_inf(V,vt,Vi,aT):
+    if V<Vi:
+        return vt
+    else:
+        return vt+aT*(V-Vi)
+
+
+def sima(Vinit,tlen,Iext,dt,vr,rf,gL,vt,C_m,Vi,aT,tau_theta1,alpha,tau_theta2):
+
+    V=np.zeros(tlen)
+    aplist=np.zeros_like(V)
+    vth=np.zeros_like(V)
+    theta1=np.zeros(tlen)
+    theta2=np.zeros(tlen)
+
+    V[0]=Vinit
+    theta1[0]=vt
+    theta2[0]=0
+    vth[0]=theta1[0]+theta2[0]
+
+    rfon=False
+    rftimer=np.inf
+
+    for i in range(1,tlen):
+
+        i_ion=gL*(V[i-1]-Vinit)
+        dVdt=(1/C_m)*(Iext[i-1]-i_ion)
+        V[i]=V[i-1]+dVdt*dt*(1-rfon)
+
+        theta_target=theta_inf(V[i-1],vt,Vi,aT)
+        dtheta1dt=(theta_target-theta1[i-1])/tau_theta1
+        theta1[i]=theta1[i-1]+dtheta1dt*dt
+
+        dtheta2dt=-theta2[i-1]/tau_theta2
+        theta2[i]=theta2[i-1]+dtheta2dt*dt
+
+        vth[i]=theta1[i]+theta2[i]
+
+        if rftimer!=np.inf:
+            rftimer-=dt
+
+        if rftimer<=0:
+            rftimer=np.inf
+            rfon=False
+
+        if V[i]>vth[i]:
+            aplist[i]=i*dt
+            rfon=True
+            rftimer=rf
+            theta2[i]+=alpha
+            vth[i]=theta1[i]+theta2[i]
+            V[i]=vr
+
+    aps=np.where(aplist!=0)[0]*dt
+    fout=0 if len(aps)<2 else 1/np.mean(np.diff(aps))
+
+    return V,fout,vth
+
+
+# ============================================================
+# PARAMETERS
+# ============================================================
+
+dirtype=2
+
+V0=[-74e-3,-78e-3,-78e-3]
+vr=[-74e-3,-78e-3,-78e-3]
+gL=[1/(79.843e6),1/(50.29e6),1/(93.36e6)]
+vt=[-71.5e-3,-67e-3,-73e-3]
+C_m=[200e-12,250e-12,740e-12]
+
+Vi=[-69.5e-3,-72e-3,-77e-3]
+aT=[0.85,0.72,0.2]
+tau_theta1=[2e-3,15.9e-3,1e-3]
+alpha=[30e-3,5e-3,3.5e-3]
+tau_theta2=[8e-3,4.1e-3,5.5e-3]
+
+rf=1e-3
+dt=1e-4
+tmax=1.5
+
+# ============================================================
+# SQUARE CURRENT PULSE
+# ============================================================
+
+t=np.arange(0,tmax,dt)
+Iext=np.zeros(len(t))
+
+start=int(len(t)*2/15)
+end=int(len(t)*4/5)
+
+Imax=0.1e-9
+Iext[start:end]=Imax
+
+# ============================================================
+# SIMULATION
+# ============================================================
+
+V,fout,vth=sima(
+    V0[dirtype],len(Iext),Iext,dt,
+    vr[dirtype],rf,gL[dirtype],vt[dirtype],C_m[dirtype],
+    Vi[dirtype],aT[dirtype],tau_theta1[dirtype],
+    alpha[dirtype],tau_theta2[dirtype]
+)
+
+# ============================================================
+# PLOT
+# ============================================================
+
+fig,(ax1,ax2)=plt.subplots(2,1,figsize=(14,10),sharex=True)
+
+ax1.plot(t,Iext*1e9,color='black',lw=2)
+ax1.set_ylabel('Input current (nA)',fontsize=fs)
+ax1.set_title('Square current pulse',fontsize=fs)
+ax1.tick_params(axis='both',labelsize=fs)
+ax1.grid(alpha=0.3)
+
+ax2.plot(t,V*1e3,label='Membrane potential',color='tab:blue',lw=1.5)
+ax2.plot(t,vth*1e3,label='Threshold potential',color='tab:red',lw=1.5)
+ax2.axhline(vt[dirtype]*1e3,color='tab:red',ls='--',alpha=0.6,label='Base threshold')
+ax2.axhline(Vi[dirtype]*1e3,color='purple',ls='--',alpha=0.8,label='Inflection potential')
+
+parameter_text=(
+    f"$V_0$ = {V0[dirtype]*1e3:.2f} mV\n"
+    f"$v_r$ = {vr[dirtype]*1e3:.2f} mV\n"
+    f"$g_L$ = {gL[dirtype]*1e9:.4f} nS\n"
+    f"$C_m$ = {C_m[dirtype]*1e12:.2f} pF\n"
+    f"$v_t$ = {vt[dirtype]*1e3:.2f} mV\n"
+    f"$V_i$ = {Vi[dirtype]*1e3:.2f} mV\n"
+    f"$a_T$ = {aT[dirtype]:.2f}\n"
+    f"$\\tau_{{\\theta 1}}$ = {tau_theta1[dirtype]*1e3:.2f} ms\n"
+    f"$\\alpha$ = {alpha[dirtype]*1e3:.2f} mV\n"
+    f"$\\tau_{{\\theta 2}}$ = {tau_theta2[dirtype]*1e3:.2f} ms\n"
+    f"$rf$ = {rf*1e3:.2f} ms"
+)
+
+ax2.text(
+    0.98,0.98,parameter_text,
+    transform=ax2.transAxes,
+    fontsize=fs,
+    verticalalignment='top',
+    horizontalalignment='right',
+    bbox=dict(boxstyle='round',facecolor='white',alpha=0.9)
+)
+
+ax2.set_xlabel('Time (s)',fontsize=fs)
+ax2.set_ylabel('Potential (mV)',fontsize=fs)
+ax2.set_title(f'Membrane potential and Lubejko threshold (firing rate = {fout:.2f} Hz)',fontsize=fs)
+ax2.tick_params(axis='both',labelsize=fs)
+ax2.legend(loc='upper left',fontsize=fs,ncol=1)
+ax2.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.show()
 #%% 9 - three tests calibrate
 from tqdm import tqdm
 from scipy.optimize import minimize
@@ -12710,6 +13022,396 @@ for i in range(3):
     plt.legend()
     if i == 1:
         plt.title('\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, tauvth={},alpha={}'.format(V0[dirtype],C_m[dirtype], vr[dirtype], gL[dirtype], vt[dirtype], tauvth[0], alpha[dirtype][0]))
+plt.show()
+#%% 9 - three tests calibrate - lubejko
+from tqdm import tqdm
+from scipy.optimize import minimize
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+from numba import jit
+import os
+import re
+
+# @jit(nopython=True)
+def sim(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m):
+
+    # Variables initialization
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+
+    # Set initial conditions
+    print(Vinit)
+    V[0] = Vinit
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+
+    for i in range(1, tlen):
+
+        i_ion = gL*(V[i-1]-Vinit)
+
+        dVdt = (1 / C_m) * (Iext[i-1]-i_ion)
+        V[i] = V[i-1] + dVdt * dt*(1-rfon)
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        if V[i] > vt:  # AP
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+            rfon = True
+            rftimer = rf
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+    if len(aps) < 2:
+        fout = 0.0
+    else:
+        fout = 1/np.mean(np.diff(aps))
+    return V, fout
+
+
+def theta_inf(V, vt, Vi, aT):
+    if V < Vi:
+        return vt
+    else:
+        return vt+aT*(V-Vi)
+
+
+def sima(Vinit, tlen, Iext, dt, vr, rf, gL, vt, C_m,
+         Vi, aT, tau_theta1, alpha, tau_theta2):
+
+    V = np.zeros(tlen)
+    aplist = np.zeros_like(V)
+    vth = np.zeros_like(V)
+
+    # Threshold components
+    theta1 = np.zeros(tlen)
+    theta2 = np.zeros(tlen)
+
+    V[0] = Vinit
+    theta1[0] = vt
+    theta2[0] = 0
+    vth[0] = theta1[0]+theta2[0]
+
+    ratio = 0#.3
+    rfon = False
+    rftimer = np.inf
+
+    for i in range(1, tlen):
+
+        # ----------------------------------------------------
+        # MEMBRANE POTENTIAL
+        # ----------------------------------------------------
+
+        i_ion = gL*(V[i-1]-Vinit)
+        dVdt = (1/C_m)*(Iext[i-1]-i_ion)
+        V[i] = V[i-1]+dVdt*dt*(1-rfon)
+
+        # ----------------------------------------------------
+        # VOLTAGE-DEPENDENT THRESHOLD COMPONENT
+        # ----------------------------------------------------
+
+        theta_target = theta_inf(V[i-1], vt, Vi, aT)
+
+        dtheta1dt = (theta_target-theta1[i-1])/tau_theta1
+        theta1[i] = theta1[i-1]+dtheta1dt*dt
+
+        # ----------------------------------------------------
+        # SPIKE-TRIGGERED THRESHOLD COMPONENT
+        # ----------------------------------------------------
+
+        dtheta2dt = -theta2[i-1]/tau_theta2
+        theta2[i] = theta2[i-1]+dtheta2dt*dt
+
+        # Total dynamic threshold
+        vth[i] = theta1[i]+theta2[i]
+
+        # ----------------------------------------------------
+        # REFRACTORY PERIOD
+        # ----------------------------------------------------
+
+        if rftimer != np.inf:
+            rftimer -= dt
+
+        if rftimer <= 0:
+            rftimer = np.inf
+            rfon = False
+
+        # ----------------------------------------------------
+        # ACTION POTENTIAL
+        # ----------------------------------------------------
+
+        if V[i] > vth[i]:
+
+            if i > int(ratio*tlen) and i < tlen:
+                aplist[i] = i*dt
+
+            rfon = True
+            rftimer = rf
+
+            # Spike-triggered threshold increment
+            theta2[i] += alpha
+
+            # Update total threshold after the spike
+            vth[i] = theta1[i]+theta2[i]
+
+            V[i] = vr
+
+    aps = getaps(aplist, dt)
+
+    if len(aps) < 2:
+        fout = 0.0
+    else:
+        fout = 1/np.mean(np.diff(aps))
+
+    return V, fout, vth, aplist, np.where(aplist != 0)[0]
+
+
+# @jit(nopython=True)
+def getaps(aplist, dt):
+    return np.where(aplist != 0)[0]*dt
+
+
+def geti(tmax, dt, A):
+    Iext = np.zeros(int(tmax/dt))
+    Iext[int(tmax/dt*2/15):int(tmax/dt*4/5)] = A
+    return Iext
+
+
+def generate_spike_train(foutlen, spike_ind, template):
+    # blank array
+    out = np.zeros(foutlen)
+
+    Ltemp = len(template)
+
+    for pos in spike_ind:
+        end = pos+Ltemp
+        if end > foutlen:
+            end = foutlen
+
+        # add template at spike
+        out[pos:end] += template[:end-pos]
+
+    return out
+
+
+def make_normalized_template(td, tr, tmax, dt, scale_I):
+    # SynKernel = A * ( exp(-(x)/tauDecay) - exp(-(x)/tauRise) )
+    t = np.arange(0, tmax, dt)
+    A = scale_I/(-(tr/td)**(td/(td-tr))+(tr/td)**(tr/(td-tr)))
+    template = A*(np.exp(-t/td)-np.exp(-t/tr))
+    return t, template
+
+
+def compute_fout_heatmap(dir1, dir2,
+                         amplitudes,
+                         strengths,
+                         tmax, dt, rf,
+                         V0, vr, gL, vt, C_m,
+                         Vi, aT, tau_theta1, alpha, tau_theta2,
+                         tr, td, ttemp):
+
+    fout_map = np.zeros((len(amplitudes), len(strengths)))
+
+    for i, A in enumerate(amplitudes):
+        # input neuron → spikes
+        Iext = geti(tmax, dt, A)
+
+        res_in = sima(
+            V0[dir1], len(Iext), Iext, dt,
+            vr[dir1], rf, gL[dir1], vt[dir1], C_m[dir1],
+            Vi[dir1], aT[dir1], tau_theta1[dir1],
+            alpha[dir1], tau_theta2[dir1]
+        )
+
+        spike_ind = res_in[4]
+
+        for j, s in enumerate(strengths):
+            print(i, len(amplitudes), j, len(strengths))
+
+            # synaptic kernel with strength s
+            _, temp = make_normalized_template(td, tr, ttemp, dt, s)
+
+            # spike train → current
+            syn_current = generate_spike_train(len(res_in[0]), spike_ind, temp)
+
+            # output neuron
+            res_out = sima(
+                V0[dir2], len(syn_current), syn_current, dt,
+                vr[dir2], rf, gL[dir2], vt[dir2], C_m[dir2],
+                Vi[dir2], aT[dir2], tau_theta1[dir2],
+                alpha[dir2], tau_theta2[dir2]
+            )
+
+            fout_map[i, j] = res_out[1]
+
+    return {
+        "fout_map": fout_map,
+        "amplitudes": amplitudes,
+        "strengths": strengths
+    }
+
+
+fbdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedback_interneuron_CSV'
+ffdir = r'C:\Users\Oliver\Desktop\Research\PYR\Feedforward_interneuron_Csv'
+somdir = r'C:\Users\Oliver\Desktop\Research\PYR\Pyramidal_neuron_soma_Csv'
+
+files = ['F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+
+somfiles = ['F-I.csv','t.csv','v-tv1.csv','v-tv10.csv','v-tv11.csv','v-tv12.csv','v-tv13.csv','v-tv14.csv','v-tv15.csv','v-tv16.csv','v-tv17.csv','v-tv18.csv','v-tv19.csv','v-tv2.csv','v-tv20.csv','v-tv21.csv','v-tv22.csv','v-tv23.csv','v-tv24.csv','v-tv25.csv','v-tv26.csv','v-tv27.csv','v-tv28.csv','v-tv29.csv','v-tv3.csv','v-tv30.csv','v-tv31.csv','v-tv32.csv','v-tv33.csv','v-tv34.csv','v-tv4.csv','v-tv5.csv','v-tv6.csv','v-tv7.csv','v-tv8.csv','v-tv9.csv']
+fbfiles = ['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'VT csv', 'VT NOISE']
+fffiles = ['.DS_Store', 'F-I.csv', 'firing_frequencies.csv', 'v-t', 'v-t noise']
+dirnames = ['Som', 'Feedback', 'Feedforward']
+ftype = 'F-I.csv'
+dirs = [somdir, fbdir, ffdir]
+
+dirtype = 0 # <-------------------- 0-som, 1-FB, 2-FF
+dnames = ['som', 'feedback', 'feedforward']
+
+dlist = []
+for dirtype in range(3):
+    data = pd.read_csv(dirs[dirtype]+'\\{}'.format(ftype))
+    data = np.array(data.iloc[:, :2])
+    data[:, 0] *= 1e-9
+    dlist.append(data)
+
+
+tmax = 1.5  # simulation run time
+dt = 1e-4 # sample rate
+rf = 1e-3  # refractory period
+
+# ============================================================
+# MEMBRANE PARAMETERS
+# ============================================================
+
+V0 = [-74e-3, -78e-3, -78e-3]  # resting potential
+vr = [-74e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+gL = [1/(79.843e6), 1/(50.29e6), 1/(93.36e6)] # leak conductance
+vt = [-71.5e-3, -67e-3, -73e-3]  # base threshold
+C_m = [200e-12, 250e-12, 740e-12] # capacitance
+
+Vi = [-69.5e-3, -72e-3, -77e-3] # Voltage where threshold begins increasing
+aT = [0.85, 0.72, 0.2]         # Slope of voltage-dependent threshold increase
+tau_theta1 = [2e-3, 15.9e-3, 1e-3] # Time constant of voltage-dependent threshold
+alpha = [30e-3, 5e-3, 3.5e-3]        # Spike-triggered threshold increment
+tau_theta2 = [8e-3, 4.1e-3, 5.5e-3]   # Decay time constant of spike-triggered threshold
+
+# ============================================================
+# SIMULATION
+# ============================================================
+
+tr = 1e-3
+td = 10e-3
+ttemp = 1
+tmax = 10
+dt = 1e-4
+strength = 1e-9
+f = 100
+
+t_temp, temp = make_normalized_template(td, tr, ttemp, dt, strength)
+
+dir1 = 0
+dir2 = 0
+
+# =============================================================================
+# amplitudes = np.array(dlist[dir1])[:,0]
+# strengths = np.linspace(1e-9, 10e-9, 20)
+#
+# res = compute_fout_heatmap(
+#     dir1=dir1, dir2=dir2,
+#     amplitudes=amplitudes,
+#     strengths=strengths,
+#     tmax=tmax, dt=dt, rf=rf,
+#     V0=V0, vr=vr, gL=gL, vt=vt, C_m=C_m,
+#     Vi=Vi, aT=aT, tau_theta1=tau_theta1,
+#     alpha=alpha, tau_theta2=tau_theta2,
+#     tr=tr, td=td, ttemp=ttemp
+# )
+#
+# # plot
+# plt.figure()
+# plt.imshow(res["fout_map"], aspect='auto', origin='lower',
+#            extent=[res["strengths"][0]*1e9, res["strengths"][-1]*1e9,
+#                    res["amplitudes"][0]*1e9, res["amplitudes"][-1]*1e9])
+#
+# plt.colorbar(label='fout (Hz)')
+# plt.xlabel('Strength (nA)')
+# plt.ylabel('Amplitude (nA)')
+# plt.title(r'${} \rightarrow {}$'.format(dnames[dir1], dnames[dir2]))
+# plt.show()
+# =============================================================================
+
+# =============================================================================
+# # sim test
+# res=sima(
+#     V0[dirtype], len(Iext), Iext, dt, vr[dirtype], rf,
+#     gL[dirtype], vt[dirtype], C_m[dirtype],
+#     Vi[dirtype], aT[dirtype], tau_theta1[dirtype],
+#     alpha[dirtype], tau_theta2[dirtype]
+# )
+# plt.plot(res[0])
+# plt.plot(res[2])
+# plt.show()
+# #%%
+# =============================================================================
+
+foutslist = []
+for i, dirtype in enumerate(range(3)):
+    alist = np.array(dlist[i])[:, 0] # amplitude list input
+    fouts = []
+
+    for a in alist:
+        Iext = geti(tmax, dt, a)
+
+        res = sima(
+            V0[dirtype], len(Iext), Iext, dt,
+            vr[dirtype], rf, gL[dirtype], vt[dirtype], C_m[dirtype],
+            Vi[dirtype], aT[dirtype], tau_theta1[dirtype],
+            alpha[dirtype], tau_theta2[dirtype]
+        )
+
+        fouts.append(res[1])
+
+    foutslist.append(fouts)
+
+
+for i in range(3):
+    plt.subplot(1, 3, i+1)
+
+    alist = dlist[i][:, 0]
+
+    plt.plot(alist*1e9, dlist[i][:, 1],
+             label='experimental', marker='o')
+
+    plt.plot(alist*1e9, foutslist[i],
+             label='simulation', marker='o', alpha=0.6)
+
+    plt.ylabel('Output frequency')
+    plt.xlabel('Input current amplitude (nA)')
+    plt.plot([], [], ' ', label='{}'.format(dirnames[i]))
+    plt.legend()
+
+    if i == 1:
+        plt.title(
+            '\nV0={}, C_m={}, v_r={}, gL={:.3g}, \nvt={}, Vi={}, aT={}, \ntau_theta1={}, alpha={}, tau_theta2={}'.format(
+                V0[i], C_m[i], vr[i], gL[i], vt[i], Vi[i], aT[i],
+                tau_theta1[i], alpha[i], tau_theta2[i]
+            )
+        )
+
+plt.tight_layout()
 plt.show()
 #%% 9 - All membrane potentials and currents - sampled from time data
 
