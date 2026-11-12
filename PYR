@@ -12294,17 +12294,33 @@ rf=1e-3
 # MEMBRANE PARAMETERS
 # ============================================================
 
+# =============================================================================
+# V0=[-74e-3,-78e-3,-78e-3]
+# vr=[-74e-3,-78e-3,-78e-3]
+# gL=[1/(79.843e6),1/(50.29e6),1/(93.36e6)]
+# vt=[-71.5e-3,-67e-3,-72e-3]
+# C_m=[200e-12,250e-12,650e-12]
+# 
+# Vi=[-69.5e-3,-72e-3,-73e-3] # Voltage where threshold begins increasing
+# aT=[0.85,0.72,0.1]         # Slope of voltage-dependent threshold increase
+# tau_theta1=[2e-3,15.9e-3,15e-3] # Time constant of voltage-dependent threshold
+# alpha=[30e-3,5e-3,11e-3]        # Spike-triggered threshold increment
+# tau_theta2=[8e-3,4.1e-3,4e-3]   # Decay time constant of spike-triggered threshold
+# =============================================================================
+
+
 V0=[-74e-3,-78e-3,-78e-3]
 vr=[-74e-3,-78e-3,-78e-3]
 gL=[1/(79.843e6),1/(50.29e6),1/(93.36e6)]
-vt=[-71.5e-3,-62e-3,-70e-3]
-C_m=[200e-12,250e-12,650e-12]
+vt=[-71.5e-3,-67e-3,-73e-3]
+C_m=[200e-12,250e-12,740e-12]
 
-Vi=[-69.5e-3,-72e-3,-72e-3] # Voltage where threshold begins increasing
-aT=[0.85,0.60,0.60]         # Slope of voltage-dependent threshold increase
-tau_theta1=[2e-3,15.9e-3,15.9e-3] # Time constant of voltage-dependent threshold
-alpha=[30e-3,7.3e-3,7.3e-3]        # Spike-triggered threshold increment
-tau_theta2=[8e-3,1.9e-3,1.9e-3]   # Decay time constant of spike-triggered threshold
+Vi=[-69.5e-3,-72e-3,-77e-3] # Voltage where threshold begins increasing
+aT=[0.85,0.72,0.2]         # Slope of voltage-dependent threshold increase
+tau_theta1=[2e-3,15.9e-3,1e-3] # Time constant of voltage-dependent threshold
+alpha=[30e-3,5e-3,3.5e-3]        # Spike-triggered threshold increment
+tau_theta2=[8e-3,4.1e-3,5.5e-3]   # Decay time constant of spike-triggered threshold
+
 
 # ============================================================
 # SIMULATION
@@ -13294,6 +13310,955 @@ for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
                 # =============================================
 
                 vth[post,t]+=alpha[post,0]+alpha[post,1]*(V[post,t]/V_threshold[post])+alpha[post,2]*(V[post,t]/V_threshold[post])**2
+                V[post,t]=vr[post]
+
+    # ========================================================
+    # SAVE FINAL RUN
+    # ========================================================
+
+    if run==navgs-1:
+        V_last=V.copy()
+        Vth_last=vth.copy()
+
+    # ========================================================
+    # FIRING RATES
+    # ========================================================
+
+    for i in range(N):
+        spike_times=time[spikes[i]==1]
+
+        if len(spike_times)>1:
+            isi=np.diff(spike_times)
+            rate_acc[run,i]=1/np.mean(isi)
+            rate_per_isi=1/isi
+            std_acc[run,i]=np.std(rate_per_isi)
+        else:
+            rate_acc[run,i]=np.nan
+            std_acc[run,i]=np.nan
+
+# ============================================================
+# MEAN FIRING RATES
+# ============================================================
+
+mean_rate=np.nanmean(rate_acc,axis=0)
+std_rate=np.nanstd(rate_acc,axis=0)
+mean_std=np.nanmean(std_acc,axis=0)
+
+print("Mean firing rates (Hz):")
+print(mean_rate)
+print("STD of mean firing rates across runs (Hz):")
+print(std_rate)
+print("Mean STD within runs (Hz):")
+print(mean_std)
+
+# ============================================================
+# PLOTS
+# ============================================================
+
+fs=11
+plot_alpha=1
+plot_neurons=[PYR1,PYR2,FB1,FF1]
+
+if ptype==0:
+
+    current_data=[]
+
+    for i in plot_neurons:
+
+        currents=[]
+
+        if i in PYR:
+            currents.append(("OB-PYR Gaussian noise",I_OB_noise_last[i],None))
+
+        connected_inputs=np.where(W[:,i]!=0)[0]
+
+        for pre in connected_inputs:
+            noise_trace=I_mini_last[pre,i]
+            AP_trace=Iconn_last[pre,i]
+            currents.append((f"{names[pre]} to {names[i]}",noise_trace,AP_trace))
+
+        if i in [FB1,FF1]:
+            currents.append(("Gaussian noise",I_self_last[i],None))
+
+        if i in [PYR1,PYR2,FF1]:
+            currents.append(("OB",I_OB_last[i],None))
+
+        current_data.append(currents)
+
+    n=max(len(currents) for currents in current_data)
+
+    if ptype2==0:
+
+        fig,ax=plt.subplots(4,n+1,figsize=(3.8*(n+1),11.5),sharex=True,squeeze=False)
+
+        for j,i in enumerate(plot_neurons):
+
+            rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD= {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+
+            ax[j,0].plot(time,V_last[i]*1000,label="V")
+
+            if threshon==1:
+                ax[j,0].plot(time,Vth_last[i]*1000,color="tab:green",label="Threshold")
+
+            ax[j,0].axhline(V0[i]*1000+3,color="red",linestyle="--",alpha=0.7)
+            ax[j,0].axhline(V0[i]*1000-3,color="red",linestyle="--",alpha=0.7)
+
+            mask=~np.isnan(spike_peak_last[i])
+            ax[j,0].scatter(time[mask],spike_peak_last[i,mask]*1000,s=30,color="black",zorder=5,label="Spike")
+            ax[j,0].set_ylabel(names[i]+" (mV)",fontsize=fs)
+
+            if i in [PYR1,PYR2]:
+                ax[j,0].set_title(rate_text+f", N_OB = {N_OB}",fontsize=fs)
+            elif i==FF1:
+                ax[j,0].set_title(rate_text+f", N_OB = {6*N_OB}",fontsize=fs)
+            else:
+                ax[j,0].set_title(rate_text,fontsize=fs)
+
+            ax[j,0].legend(fontsize=fs-3,loc="upper right")
+            ax[j,0].tick_params(axis="both",labelsize=fs-2)
+
+            for col,(label,noise_trace,AP_trace) in enumerate(current_data[j],start=1):
+
+                iax=ax[j,col]
+                iax.plot(time,noise_trace*1e12,color="tab:blue",alpha=plot_alpha,label="Noise")
+                iax.set_ylabel("Noise current (pA)",fontsize=fs-1,color="tab:blue")
+                iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
+
+                if AP_trace is not None:
+                    apax=iax.twinx()
+                    apax.plot(time,AP_trace*1e12,color="tab:orange",alpha=plot_alpha,label="AP current")
+                    apax.set_ylabel("AP current (pA)",fontsize=fs-1,color="tab:orange")
+                    apax.tick_params(axis="y",labelcolor="tab:orange",labelsize=fs-2)
+
+                    lines1,labels1=iax.get_legend_handles_labels()
+                    lines2,labels2=apax.get_legend_handles_labels()
+                    iax.legend(lines1+lines2,labels1+labels2,fontsize=fs-3,loc="upper right")
+
+                else:
+                    iax.legend(fontsize=fs-3,loc="upper right")
+
+                iax.set_title(label,fontsize=fs)
+                iax.tick_params(axis="x",labelsize=fs-2)
+
+            for col in range(len(current_data[j])+1,n+1):
+                ax[j,col].axis("off")
+
+        for col in range(n+1):
+            ax[-1,col].set_xlabel("Time (sec)",fontsize=fs-1)
+
+        fig.subplots_adjust(left=0.06,right=0.97,bottom=0.06,top=0.96,wspace=0.3,hspace=0.3)
+
+    elif ptype2==1:
+
+        fig,ax=plt.subplots(n+1,4,figsize=(15,3.0*(n+1)),sharex=True,squeeze=False)
+
+        for j,i in enumerate(plot_neurons):
+
+            rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD= {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+
+            vax=ax[0,j]
+            vax.plot(time,V_last[i]*1000,label="V")
+
+            if threshon==1:
+                vax.plot(time,Vth_last[i]*1000,color="tab:green",label="Threshold")
+
+            vax.axhline(V0[i]*1000+3,color="red",linestyle="--",alpha=0.7)
+            vax.axhline(V0[i]*1000-3,color="red",linestyle="--",alpha=0.7)
+
+            mask=~np.isnan(spike_peak_last[i])
+            vax.scatter(time[mask],spike_peak_last[i,mask]*1000,s=30,color="black",zorder=5,label="Spike")
+            vax.set_ylabel(names[i]+" (mV)",fontsize=fs)
+
+            if i in [PYR1,PYR2]:
+                vax.set_title(rate_text+f", N_OB = {N_OB}",fontsize=fs)
+            elif i==FF1:
+                vax.set_title(rate_text+f", N_OB = {6*N_OB}",fontsize=fs)
+            else:
+                vax.set_title(rate_text,fontsize=fs)
+
+            vax.legend(fontsize=fs-3,loc="upper right")
+            vax.tick_params(axis="both",labelsize=fs-2)
+
+            for row,(label,noise_trace,AP_trace) in enumerate(current_data[j],start=1):
+
+                iax=ax[row,j]
+                iax.plot(time,noise_trace*1e12,color="tab:blue",alpha=plot_alpha,label="Noise")
+                iax.set_ylabel("Noise current (pA)",fontsize=fs-1,color="tab:blue")
+                iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
+
+                if AP_trace is not None:
+                    apax=iax.twinx()
+                    apax.plot(time,AP_trace*1e12,color="tab:orange",alpha=plot_alpha,label="AP current")
+                    apax.set_ylabel("AP current (pA)",fontsize=fs-1,color="tab:orange")
+                    apax.tick_params(axis="y",labelcolor="tab:orange",labelsize=fs-2)
+
+                    lines1,labels1=iax.get_legend_handles_labels()
+                    lines2,labels2=apax.get_legend_handles_labels()
+                    iax.legend(lines1+lines2,labels1+labels2,fontsize=fs-3,loc="upper right")
+
+                else:
+                    iax.legend(fontsize=fs-3,loc="upper right")
+
+                iax.set_title(label,fontsize=fs)
+                iax.tick_params(axis="x",labelsize=fs-2)
+
+            for row in range(len(current_data[j])+1,n+1):
+                ax[row,j].axis("off")
+
+        for j in range(4):
+            ax[-1,j].set_xlabel("Time (sec)",fontsize=fs-1)
+
+        fig.subplots_adjust(left=0.07,right=0.97,bottom=0.06,top=0.96,wspace=0.35,hspace=0.4)
+
+elif ptype==1:
+
+    # --------------------------------------------------------
+    # FIGURE 1: MEMBRANE POTENTIALS
+    # --------------------------------------------------------
+
+    fig1,ax1=plt.subplots(2,2,figsize=(12,7),sharex=True)
+    ax1=ax1.flatten()
+
+    for j,i in enumerate(plot_neurons):
+
+        rate_text=(f"rate = {mean_rate[i]:.2f} Hz, STD = {std_rate[i]:.2f} Hz" if not np.isnan(mean_rate[i]) else "rate = N/A")
+
+        vax=ax1[j]
+        vax.plot(time,V_last[i]*1000,label="V")
+
+        if threshon==1:
+            vax.plot(time,Vth_last[i]*1000,color="tab:green",label="Threshold")
+
+        vax.axhline(V0[i]*1000+3,color="red",linestyle="--",alpha=0.7)
+        vax.axhline(V0[i]*1000-3,color="red",linestyle="--",alpha=0.7)
+
+        mask=~np.isnan(spike_peak_last[i])
+        vax.scatter(time[mask],spike_peak_last[i,mask]*1000,s=30,color="black",zorder=5,label="Spike")
+        vax.set_ylabel(names[i]+" (mV)",fontsize=fs)
+
+        if i in [PYR1,PYR2]:
+            vax.set_title(rate_text+f", N_OB = {N_OB}",fontsize=fs)
+        elif i==FF1:
+            vax.set_title(rate_text+f", N_OB = {6*N_OB}",fontsize=fs)
+        else:
+            vax.set_title(rate_text,fontsize=fs)
+
+        vax.legend(fontsize=fs-3,loc="upper right")
+        vax.tick_params(axis="both",labelsize=fs-2)
+        vax.set_xlabel("Time (sec)",fontsize=fs-1)
+
+    fig1.subplots_adjust(left=0.07,right=0.98,bottom=0.09,top=0.93,wspace=0.22,hspace=0.3)
+
+    # --------------------------------------------------------
+    # FIGURE 2: ALL CURRENTS
+    # --------------------------------------------------------
+
+    if ptype2==0:
+
+        fig2,ax2=plt.subplots(4,n,figsize=(3.8*n,11.5),sharex=True,squeeze=False)
+
+        for j,i in enumerate(plot_neurons):
+
+            for col,(label,noise_trace,AP_trace) in enumerate(current_data[j]):
+
+                iax=ax2[j,col]
+                iax.plot(time,noise_trace*1e12,color="tab:blue",alpha=plot_alpha,label="Noise")
+                iax.set_ylabel("Noise current (pA)",fontsize=fs-1,color="tab:blue")
+                iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
+
+                if AP_trace is not None:
+                    apax=iax.twinx()
+                    apax.plot(time,AP_trace*1e12,color="tab:orange",alpha=plot_alpha,label="AP current")
+                    apax.set_ylabel("AP current (pA)",fontsize=fs-1,color="tab:orange")
+                    apax.tick_params(axis="y",labelcolor="tab:orange",labelsize=fs-2)
+
+                    lines1,labels1=iax.get_legend_handles_labels()
+                    lines2,labels2=apax.get_legend_handles_labels()
+                    iax.legend(lines1+lines2,labels1+labels2,fontsize=fs-3,loc="upper right")
+
+                else:
+                    iax.legend(fontsize=fs-3,loc="upper right")
+
+                iax.set_title(label,fontsize=fs)
+                iax.tick_params(axis="x",labelsize=fs-2)
+
+            for col in range(len(current_data[j]),n):
+                ax2[j,col].axis("off")
+
+            ax2[j,0].set_ylabel(names[i]+"\nNoise current (pA)",fontsize=fs)
+
+            for col in range(n):
+                if j==3:
+                    ax2[j,col].set_xlabel("Time (sec)",fontsize=fs-1)
+
+        fig2.subplots_adjust(left=0.07,right=0.97,bottom=0.06,top=0.96,wspace=0.3,hspace=0.3)
+
+    elif ptype2==1:
+
+        fig2,ax2=plt.subplots(n,4,figsize=(15,3.0*n),sharex=True,squeeze=False)
+
+        for j,i in enumerate(plot_neurons):
+
+            for row,(label,noise_trace,AP_trace) in enumerate(current_data[j]):
+
+                iax=ax2[row,j]
+                iax.plot(time,noise_trace*1e12,color="tab:blue",alpha=plot_alpha,label="Noise")
+                iax.set_ylabel("Noise current (pA)",fontsize=fs-1,color="tab:blue")
+                iax.tick_params(axis="y",labelcolor="tab:blue",labelsize=fs-2)
+
+                if AP_trace is not None:
+                    apax=iax.twinx()
+                    apax.plot(time,AP_trace*1e12,color="tab:orange",alpha=plot_alpha,label="AP current")
+                    apax.set_ylabel("AP current (pA)",fontsize=fs-1,color="tab:orange")
+                    apax.tick_params(axis="y",labelcolor="tab:orange",labelsize=fs-2)
+
+                    lines1,labels1=iax.get_legend_handles_labels()
+                    lines2,labels2=apax.get_legend_handles_labels()
+                    iax.legend(lines1+lines2,labels1+labels2,fontsize=fs-3,loc="upper right")
+
+                else:
+                    iax.legend(fontsize=fs-3,loc="upper right")
+
+                iax.set_title(names[i]+" - "+label,fontsize=fs)
+                iax.tick_params(axis="x",labelsize=fs-2)
+
+            for row in range(len(current_data[j]),n):
+                ax2[row,j].axis("off")
+
+            for row in range(n):
+                if row==n-1:
+                    ax2[row,j].set_xlabel("Time (sec)",fontsize=fs-1)
+
+        fig2.subplots_adjust(left=0.07,right=0.97,bottom=0.06,top=0.96,wspace=0.35,hspace=0.4)
+
+plt.show()
+
+#%% 9 - All membrane potentials and currents - Lubejko
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from tqdm import tqdm
+
+N=6
+PYR1,PYR2,FB1,FB2,FF1,FF2=range(6)
+names=["PYR1","PYR2","FB1","FB2","FF1","FF2"]
+PYR=[PYR1,PYR2]
+FB=[FB1,FB2]
+FF=[FF1,FF2]
+
+V0=np.zeros(N)
+C_m=np.zeros(N)
+vr=np.zeros(N)
+gL=np.zeros(N)
+V_threshold=np.zeros(N)
+Vi=np.zeros(N)
+aT=np.zeros(N)
+tau_theta1=np.zeros(N)
+alpha=np.zeros(N)
+tau_theta2=np.zeros(N)
+
+# =============================================================================
+# V0 = [-74e-3, -78e-3, -78e-3]  # reverse potential
+# vr = [-74e-3, -78e-3, -78e-3] # reset potential after postsynaptic AP
+# gL = [1/(79.843e6), 1/(50.29e6), 1/(93.36e6)] # 15e-9  # leak conductance
+# vt = [-71.5e-3, -62e-3, -70e-3]  # threshold base level
+# C_m = [100e-12, 250e-12, 650e-12] # capacitance
+# tauvth = [5.8e-3, 1e-3, 1e-3] # threshold time constant
+# alpha = [[220e-3, 50e-3, 50e-3],
+#          [1e-3, 1e-3, 1e-3],
+#          [1e-3, 1e-3, 1e-3]]
+# =============================================================================
+
+# PYR parameters
+for i in PYR:
+    V0[i]=-74e-3
+    C_m[i]=200e-12
+    vr[i]=-74e-3
+    gL[i]=1/(79.843e6)
+    V_threshold[i]=-71.5e-3
+    Vi[i]=-69.5e-3
+    aT[i]=0.85
+    tau_theta1[i]=2e-3
+    alpha[i]=30e-3
+    tau_theta2[i]=8e-3
+
+# FB parameters
+for i in FB:
+    V0[i]=-78e-3
+    C_m[i]=250e-12
+    vr[i]=-78e-3
+    gL[i]=1/(50.29e6)
+    # V_threshold[i]=-62e-3
+    V_threshold[i]=-67e-3
+    Vi[i]=-72e-3
+    aT[i]=0.72
+    tau_theta1[i]=15.9e-3
+    alpha[i]=5e-3
+    tau_theta2[i]=4.1e-3
+
+# FF parameters
+for i in FF:
+    V0[i]=-78e-3
+    C_m[i]=740e-12
+    vr[i]=-78e-3
+    gL[i]=1/(93.36e6)
+    V_threshold[i]=-73e-3
+    Vi[i]=-77e-3
+    aT[i]=0.2
+    tau_theta1[i]=1e-3
+    alpha[i]=3.5e-3
+    tau_theta2[i]=5.5e-3
+
+def theta_inf(V,vt,Vi,aT):
+    if V<Vi:
+        return vt
+    return vt+aT*(V-Vi)
+
+# ============================================================
+# CONNECTION MATRIX
+# ============================================================
+
+W=np.zeros((N,N))
+
+W[PYR1,PYR2]=1
+W[PYR1,FB1]=1
+W[PYR1,FB2]=0
+
+W[PYR2,PYR1]=1
+W[PYR2,FB1]=1
+W[PYR2,FB2]=0
+
+W[FB1,PYR1]=1
+W[FB1,PYR2]=1
+W[FB1,FB2]=0
+
+W[FB2,PYR1]=0
+W[FB2,PYR2]=0
+W[FB2,FB1]=0
+
+W[FF1,PYR1]=1
+W[FF1,PYR2]=1
+W[FF1,FF2]=0
+
+W[FF2,PYR1]=0
+W[FF2,PYR2]=0
+W[FF2,FF1]=0
+
+# ============================================================
+# SYNAPTIC PARAMETERS
+# ============================================================
+
+AP_PYR_PYR=500e-12
+RISE_PYR_PYR=0.2e-3
+FALL_PYR_PYR=20e-3
+
+AP_PYR_FB=117e-12 # this should change
+RISE_PYR_FB=0.2e-3
+FALL_PYR_FB=2.63e-3
+
+AP_FB_PYR=-159e-12
+RISE_FB_PYR=0.68e-3
+FALL_FB_PYR=10e-3
+
+AP_FF_PYR=-60e-12
+RISE_FF_PYR=2e-3
+FALL_FF_PYR=10e-3
+
+# Firing rates:
+# pyr=2.6,fb=7,ff=9
+
+N_OB=21
+A_OB_PYR=42e-12 # 38.6+-9.6 = 29 to 48.2
+A_OB_FF=38e-12 # 43.1+-12 = 31.1 to 55.1
+
+A_OB_FF2=43.1e-12*0 # always 0 for this reduced model
+
+tau_OB_rise=0.2e-3
+tau_OB_decay=1e-3
+
+# ============================================================
+# TRANSMISSION DELAYS
+# ============================================================
+
+tdelay_OB_PYR=2e-3
+tdelay_OB_FF=2e-3
+
+tdelay_PYR_PYR=2e-3
+tdelay_PYR_FB=2e-3
+
+tdelay_FB_PYR=1.25e-3
+tdelay_FF_PYR=2e-3
+
+# ============================================================
+# GAUSSIAN MINI STANDARD DEVIATIONS
+# ============================================================
+
+NOISE_PYR_PYR_POS=200e-12
+NOISE_OB_PYR=NOISE_PYR_PYR_POS/2
+
+NOISE_PYR_FB_POS=NOISE_PYR_PYR_POS/2*0
+
+NOISE_FB_PYR_NEG=NOISE_PYR_PYR_POS
+NOISE_FF_PYR_NEG=NOISE_FB_PYR_NEG/2
+
+NOISE_FB1_SELF=NOISE_PYR_PYR_POS
+NOISE_FF1_SELF=300e-12
+
+# ============================================================
+# SIMULATION PARAMETERS
+# ============================================================
+
+kPYR1=1
+kFB1=1
+kFF1=1
+prAPPYR=0.5
+prAPFB=0.7
+prAPFF=0.5
+MPYR=3*5 # number of docking * number synapse
+MFB=5*5
+MFF=5*5
+kPYR2=kPYR1
+kFB2=kFB1
+kFF2=kFF1
+k=[kPYR1,kPYR2,kFB1,kFB2,kFF1,kFF2]
+T=2
+navgs=1
+dt=1e-4
+rf=1e-3
+ttype=9
+
+threshon=1  # 0 = off, 1 = on
+ptype=0 # plot type, 0=all together, 1=v and i sep.
+ptype2=0 # 0=horizontal, 1=vertical
+
+
+
+# ============================================================
+# OB FIRING DATA
+# ============================================================
+
+file_path=r"C:\Users\Oliver\Desktop\Research\PYR\Spike Timing Data.xlsx"
+datad=pd.read_excel(file_path)
+tdata=np.array([row.dropna().values/1000 for _,row in datad.iloc[:,2:].iterrows()],dtype=object)
+
+# ============================================================
+# TIME
+# ============================================================
+
+time=np.arange(0,T,dt)
+
+# ============================================================
+# OB CURRENT
+# ============================================================
+
+t_peak_OB=(tau_OB_rise*tau_OB_decay/(tau_OB_decay-tau_OB_rise))*np.log(tau_OB_decay/tau_OB_rise)
+OB_norm=np.exp(-t_peak_OB/tau_OB_decay)-np.exp(-t_peak_OB/tau_OB_rise)
+
+def make_ob_current(time,firing_times,amplitude,delay):
+    I_OB=np.zeros(len(time))
+    for times in firing_times:
+        for t_fire in times:
+            if t_fire<0 or t_fire>=T:
+                continue
+            t_start=t_fire+delay
+            if t_start>=T:
+                continue
+            start=np.searchsorted(time,t_start)
+            if start>=len(time):
+                continue
+            t_rel=time[start:]-t_start
+            I_OB[start:]+=amplitude*(np.exp(-t_rel/tau_OB_decay)-np.exp(-t_rel/tau_OB_rise))/OB_norm
+    return I_OB
+
+# ============================================================
+# CONNECTION-SPECIFIC SV POOLS
+# ============================================================
+
+M=np.zeros((N,N),dtype=int)
+M[PYR1,PYR2]=MPYR
+M[PYR1,FB1]=MPYR
+M[PYR1,FB2]=MPYR
+M[PYR2,PYR1]=MPYR
+M[PYR2,FB1]=MPYR
+M[PYR2,FB2]=MPYR
+M[FB1,PYR1]=MFB
+M[FB1,PYR2]=MFB
+M[FB1,FB2]=MFB
+M[FB2,PYR1]=MFB
+M[FB2,PYR2]=MFB
+M[FB2,FB1]=MFB
+M[FF1,PYR1]=MFF
+M[FF1,PYR2]=MFF
+M[FF1,FF2]=MFF
+M[FF2,PYR1]=MFF
+M[FF2,PYR2]=MFF
+M[FF2,FF1]=MFF
+
+# ============================================================
+# AP RELEASE PROBABILITIES
+# ============================================================
+
+prAP=np.zeros((N,N))
+
+for pre in PYR:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prAP[pre,post]=prAPPYR
+
+for pre in FB:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prAP[pre,post]=prAPFB
+
+for pre in FF:
+    for post in range(N):
+        if W[pre,post]!=0:
+            prAP[pre,post]=prAPFF
+
+# ============================================================
+# CONNECTION-SPECIFIC CURRENT PARAMETERS
+# ============================================================
+
+AP_amplitude=np.zeros((N,N))
+tau_rise=np.zeros((N,N))
+tau_fall=np.zeros((N,N))
+
+AP_amplitude[PYR1,PYR2]=AP_PYR_PYR
+AP_amplitude[PYR2,PYR1]=AP_PYR_PYR
+AP_amplitude[PYR1,FB1]=AP_PYR_FB
+AP_amplitude[PYR2,FB1]=AP_PYR_FB
+AP_amplitude[FB1,PYR1]=AP_FB_PYR
+AP_amplitude[FB1,PYR2]=AP_FB_PYR
+AP_amplitude[FF1,PYR1]=AP_FF_PYR
+AP_amplitude[FF1,PYR2]=AP_FF_PYR
+
+tau_rise[PYR1,PYR2]=RISE_PYR_PYR
+tau_rise[PYR2,PYR1]=RISE_PYR_PYR
+tau_rise[PYR1,FB1]=RISE_PYR_FB
+tau_rise[PYR2,FB1]=RISE_PYR_FB
+tau_rise[FB1,PYR1]=RISE_FB_PYR
+tau_rise[FB1,PYR2]=RISE_FB_PYR
+tau_rise[FF1,PYR1]=RISE_FF_PYR
+tau_rise[FF1,PYR2]=RISE_FF_PYR
+
+tau_fall[PYR1,PYR2]=FALL_PYR_PYR
+tau_fall[PYR2,PYR1]=FALL_PYR_PYR
+tau_fall[PYR1,FB1]=FALL_PYR_FB
+tau_fall[PYR2,FB1]=FALL_PYR_FB
+tau_fall[FB1,PYR1]=FALL_FB_PYR
+tau_fall[FB1,PYR2]=FALL_FB_PYR
+tau_fall[FF1,PYR1]=FALL_FF_PYR
+tau_fall[FF1,PYR2]=FALL_FF_PYR
+
+# ============================================================
+# SYNAPTIC DELAYS
+# ============================================================
+
+syn_delay=np.zeros((N,N))
+syn_delay[PYR1,PYR2]=tdelay_PYR_PYR
+syn_delay[PYR2,PYR1]=tdelay_PYR_PYR
+syn_delay[PYR1,FB1]=tdelay_PYR_FB
+syn_delay[PYR2,FB1]=tdelay_PYR_FB
+syn_delay[FB1,PYR1]=tdelay_FB_PYR
+syn_delay[FB1,PYR2]=tdelay_FB_PYR
+syn_delay[FF1,PYR1]=tdelay_FF_PYR
+syn_delay[FF1,PYR2]=tdelay_FF_PYR
+
+# ============================================================
+# GAUSSIAN MINI CURRENTS
+# ============================================================
+
+def get_mini_currents():
+    I_mini=np.zeros((N,N))
+    I_OB_noise=np.zeros(N)
+
+    # One excitatory Gaussian sample per PYR, split equally
+    # between PYR-PYR and aggregate OB-PYR input.
+
+    for pyr,other_pyr in [(PYR1,PYR2),(PYR2,PYR1)]:
+        noise_exc=abs(np.random.normal(0,NOISE_PYR_PYR_POS))
+        I_mini[other_pyr,pyr]=noise_exc/2
+
+    # One identical OB-PYR Gaussian sample for both PYR neurons.
+
+    noise_ob_pyr=abs(np.random.normal(0,NOISE_OB_PYR))
+    I_OB_noise[PYR1]=noise_ob_pyr
+    I_OB_noise[PYR2]=noise_ob_pyr
+
+    # One inhibitory Gaussian sample per PYR, split equally
+    # between FB-PYR and FF-PYR input.
+
+    for pyr in PYR:
+        noise_inh=abs(np.random.normal(0,NOISE_FB_PYR_NEG))
+        I_mini[FB1,pyr]=-noise_inh/2
+        I_mini[FF1,pyr]=-noise_inh/2
+
+    # PYR-FB excitatory noise remains unchanged.
+
+    for pyr in PYR:
+        noise_pyr_fb=abs(np.random.normal(0,NOISE_PYR_FB_POS))
+        I_mini[pyr,FB1]=noise_pyr_fb
+
+    return I_mini,I_OB_noise
+
+# ============================================================
+# DISABLE CONNECTIONS FOR DIFFERENT TEST TYPES
+# ============================================================
+
+if ttype==0:
+    W[PYR2,PYR1],W[PYR1,PYR2]=0,0
+
+if ttype==1:
+    W[FB1,PYR1],W[FB2,PYR1],W[FB1,PYR2],W[FB2,PYR2]=0,0,0,0
+
+if ttype==2:
+    W[FF1,PYR1],W[FF2,PYR1],W[FF1,PYR2],W[FF2,PYR2]=0,0,0,0
+
+# ============================================================
+# STORAGE
+# ============================================================
+
+rate_acc=np.zeros((navgs,N))
+std_acc=np.zeros((navgs,N))
+V_last=None
+I_last=None
+spike_peak_last=None
+Vth_last=None
+Iconn_last=None
+I_OB_last=None
+I_mini_last=None
+I_OB_noise_last=None
+I_self_last=None
+
+# ============================================================
+# SIMULATION
+# ============================================================
+
+for run in tqdm(range(navgs),desc="Running simulations",unit="run"):
+
+    rng=np.random.default_rng()
+    PYR1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
+    PYR2_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=N_OB,replace=False)]
+    FF1_OB_times=[tdata[i] for i in rng.choice(len(tdata),size=6*N_OB,replace=False)]
+
+    V=np.zeros((N,len(time)))
+    vth=np.zeros((N,len(time)))
+    theta1=np.zeros((N,len(time)))
+    theta2=np.zeros((N,len(time)))
+    spikes=np.zeros((N,len(time)))
+    Ispike=np.zeros((N,N))
+    I_decay=np.zeros((N,N))
+    I_rise=np.zeros((N,N))
+    pending_AP=[]
+    ndsv=M.copy()
+    next_refill=np.full((N,N),np.inf)
+
+    if run==navgs-1:
+        spike_peak_last=np.full((N,len(time)),np.nan)
+        I_last=np.zeros((N,len(time)))
+        Iconn_last=np.zeros((N,N,len(time)))
+        I_OB_last=np.zeros((N,len(time)))
+        I_mini_last=np.zeros((N,N,len(time)))
+        I_OB_noise_last=np.zeros((N,len(time)))
+        I_self_last=np.zeros((N,len(time)))
+
+    V[:,0]=V0
+    theta1[:,0]=V_threshold
+    theta2[:,0]=0
+    vth[:,0]=theta1[:,0]+theta2[:,0]
+    rfon=np.zeros(N)
+    rftimer=np.ones(N)*np.inf
+
+    # ========================================================
+    # PRECOMPUTE OB CURRENTS
+    # ========================================================
+
+    I_OB_PYR1=make_ob_current(time,PYR1_OB_times,A_OB_PYR,tdelay_OB_PYR)
+    I_OB_PYR2=make_ob_current(time,PYR2_OB_times,A_OB_PYR,tdelay_OB_PYR)
+    I_OB_FF1=make_ob_current(time,FF1_OB_times,A_OB_FF,tdelay_OB_FF)
+    I_OB_FF2=make_ob_current(time,[],A_OB_FF2,tdelay_OB_FF)
+
+    # ========================================================
+    # TIME LOOP
+    # ========================================================
+
+    for t in range(1,len(time)):
+
+        current_time=t*dt
+
+        # ====================================================
+        # START DELAYED AP-EVOKED SYNAPTIC CURRENTS
+        # ====================================================
+
+        if pending_AP:
+            remaining_AP=[]
+
+            for start_time,pre,target,B in pending_AP:
+                if current_time>=start_time:
+                    if tau_rise[pre,target]>0 and tau_fall[pre,target]>0:
+                        t_peak=(tau_rise[pre,target]*tau_fall[pre,target]/(tau_fall[pre,target]-tau_rise[pre,target]))*np.log(tau_fall[pre,target]/tau_rise[pre,target])
+                        norm=np.exp(-t_peak/tau_fall[pre,target])-np.exp(-t_peak/tau_rise[pre,target])
+                        I_decay[pre,target]+=AP_amplitude[pre,target]*B/norm
+                        I_rise[pre,target]+=AP_amplitude[pre,target]*B/norm
+                    else:
+                        Ispike[pre,target]+=AP_amplitude[pre,target]*B
+                else:
+                    remaining_AP.append((start_time,pre,target,B))
+
+            pending_AP=remaining_AP
+
+        # ====================================================
+        # REPLENISH EACH SYNAPTIC POOL INDEPENDENTLY
+        # ====================================================
+
+        for pre in range(N):
+            for post in range(N):
+                if W[pre,post]==0:
+                    continue
+                if current_time>=next_refill[pre,post] and ndsv[pre,post]<M[pre,post]:
+                    ndsv[pre,post]+=1
+                    if ndsv[pre,post]<M[pre,post]:
+                        rate=k[pre]*(M[pre,post]-ndsv[pre,post])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[pre,post]=current_time+wait
+                    else:
+                        next_refill[pre,post]=np.inf
+
+        # ====================================================
+        # DECAY SYNAPTIC CURRENTS
+        # ====================================================
+
+        for pre in range(N):
+            for post in range(N):
+                if W[pre,post]==0:
+                    continue
+                if tau_rise[pre,post]>0 and tau_fall[pre,post]>0:
+                    I_decay[pre,post]+=dt*(-I_decay[pre,post]/tau_fall[pre,post])
+                    I_rise[pre,post]+=dt*(-I_rise[pre,post]/tau_rise[pre,post])
+                    Ispike[pre,post]=I_decay[pre,post]-I_rise[pre,post]
+
+        # ====================================================
+        # OB CURRENT
+        # ====================================================
+
+        I_OB_PYR1_t=I_OB_PYR1[t]
+        I_OB_PYR2_t=I_OB_PYR2[t]
+        I_OB_FF1_t=I_OB_FF1[t]
+        I_OB_FF2_t=I_OB_FF2[t]
+
+        # ====================================================
+        # GAUSSIAN MINI CURRENTS
+        # ====================================================
+
+        I_mini,I_OB_noise=get_mini_currents()
+
+        # ====================================================
+        # SELF NOISE
+        # ====================================================
+
+        I_self_noise=np.zeros(N)
+
+        I_self_noise[FB1]=np.random.normal(0,NOISE_FB1_SELF)
+        # I_self_noise[FB1]=-abs(np.random.normal(0,NOISE_FB1_SELF))
+        I_self_noise[FF1]=np.random.normal(0,NOISE_FF1_SELF)
+
+        # ====================================================
+        # STORE CURRENTS
+        # ====================================================
+
+        if run==navgs-1:
+            Iconn_last[:,:,t]=Ispike
+            I_mini_last[:,:,t]=I_mini
+            I_OB_noise_last[:,t]=I_OB_noise
+            I_self_last[:,t]=I_self_noise
+
+            for post in range(N):
+                I_last[post,t]=np.sum(Ispike[:,post]+I_mini[:,post])+I_OB_noise[post]+I_self_noise[post]
+
+            I_OB_last[PYR1,t]=I_OB_PYR1_t
+            I_OB_last[PYR2,t]=I_OB_PYR2_t
+            I_OB_last[FF1,t]=I_OB_FF1_t
+            I_OB_last[FF2,t]=I_OB_FF2_t
+
+        # ====================================================
+        # UPDATE NEURONS
+        # ====================================================
+
+        for post in range(N):
+
+            Isyn=np.sum(Ispike[:,post]+I_mini[:,post])
+
+            if post==PYR1:
+                I_OB=I_OB_PYR1_t
+            elif post==PYR2:
+                I_OB=I_OB_PYR2_t
+            elif post==FF1:
+                I_OB=I_OB_FF1_t
+            elif post==FF2:
+                I_OB=I_OB_FF2_t
+            else:
+                I_OB=0.0
+
+            I=Isyn+I_OB+I_OB_noise[post]+I_self_noise[post]
+            i_ion=gL[post]*(V[post,t-1]-V0[post])
+            dVdt=(I-i_ion)/C_m[post]
+            V[post,t]=V[post,t-1]+dt*dVdt*(1-rfon[post])
+
+            theta1_inf=theta_inf(V[post,t-1],V_threshold[post],Vi[post],aT[post])
+            dtheta1dt=-(theta1[post,t-1]-theta1_inf)/tau_theta1[post]
+            theta1[post,t]=theta1[post,t-1]+dt*dtheta1dt
+            dtheta2dt=-theta2[post,t-1]/tau_theta2[post]
+            theta2[post,t]=theta2[post,t-1]+dt*dtheta2dt
+            vth[post,t]=theta1[post,t]+theta2[post,t]
+
+            if rftimer[post]!=np.inf:
+                rftimer[post]-=dt
+
+            if rftimer[post]<=0:
+                rftimer[post]=np.inf
+                rfon[post]=False
+
+            # =================================================
+            # AP
+            # =================================================
+
+            if V[post,t]>vth[post,t]:
+
+                spikes[post,t]=1
+
+                if run==navgs-1:
+                    spike_peak_last[post,t]=V[post,t]
+
+                rfon[post]=True
+                rftimer[post]=rf
+
+                # =============================================
+                # AP-EVOKED RELEASE
+                # =============================================
+
+                for target in range(N):
+                    if W[post,target]==0:
+                        continue
+
+                    B=np.random.binomial(ndsv[post,target],prAP[post,target])
+                    ndsv[post,target]-=B
+
+                    if B>0:
+                        start_time=current_time+syn_delay[post,target]
+                        pending_AP.append((start_time,post,target,B))
+
+                    if B>0 and ndsv[post,target]<M[post,target]:
+                        rate=k[post]*(M[post,target]-ndsv[post,target])
+                        wait=np.random.exponential(1/rate)
+                        next_refill[post,target]=current_time+wait
+
+                # =============================================
+                # ADAPTIVE THRESHOLD
+                # =============================================
+
+                theta2[post,t]+=alpha[post]
+                vth[post,t]=theta1[post,t]+theta2[post,t]
                 V[post,t]=vr[post]
 
     # ========================================================
